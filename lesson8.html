@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Lesson 8: Modern Architecture Variants — LLM Deep Dive</title>
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body data-lesson="8">
+
+<nav class="top-nav">
+  <a href="index.html" class="nav-brand"><span class="emoji">🧠</span> LLM Deep Dive</a>
+  <span class="nav-lesson">Lesson 8: Modern Architecture Variants</span>
+  <button class="menu-btn" aria-label="Lessons">☰</button>
+</nav>
+
+<div class="drawer-overlay"></div>
+<aside class="lesson-drawer">
+  <div class="drawer-header"><h3>Course Syllabus</h3><button class="drawer-close">✕</button></div>
+  <ul class="lesson-list">
+    <li><a href="index.html"><span class="lesson-num">🏠</span>Home</a></li>
+    <li><a href="lesson1.html"><span class="lesson-num">01</span>Tokenization &amp; Embeddings <span class="lesson-check" data-lesson="1"></span></a></li>
+    <li><a href="lesson2.html"><span class="lesson-num">02</span>The Transformer Architecture <span class="lesson-check" data-lesson="2"></span></a></li>
+    <li><a href="lesson3.html"><span class="lesson-num">03</span>Training &amp; Pretraining <span class="lesson-check" data-lesson="3"></span></a></li>
+    <li><a href="lesson4.html"><span class="lesson-num">04</span>Quantization &amp; Compression <span class="lesson-check" data-lesson="4"></span></a></li>
+    <li><a href="lesson5.html"><span class="lesson-num">05</span>Inference &amp; Deployment <span class="lesson-check" data-lesson="5"></span></a></li>
+    <li><a href="lesson6.html"><span class="lesson-num">06</span>Scaling Laws <span class="lesson-check" data-lesson="6"></span></a></li>
+    <li><a href="lesson7.html"><span class="lesson-num">07</span>Alignment &amp; Instruction <span class="lesson-check" data-lesson="7"></span></a></li>
+    <li><a href="lesson8.html" class="active"><span class="lesson-num">08</span>Modern Variants <span class="lesson-check" data-lesson="8"></span></a></li>
+  </ul>
+  <div class="progress-bar"><div class="progress-bar-fill" style="width:0%"></div></div>
+</aside>
+
+<main class="container">
+  <header class="lesson-header">
+    <div class="lesson-meta">Lesson 8 of 8</div>
+    <h1>Modern Architecture Variants</h1>
+    <p class="lesson-subtitle">Beyond the vanilla transformer — MoE, GQA, RoPE, Mamba, FlashAttention</p>
+  </header>
+
+  <div class="story-hook">
+    The original 2017 transformer has been modified extensively in every modern LLM. Mixture of Experts scales to trillions of parameters without proportional compute cost. Grouped-Query Attention slashes the KV cache. FlashAttention makes attention IO-aware rather than compute-bound. And Mamba challenges the dominance of attention itself with state space models. These innovations, not raw scale, are what differentiate GPT-4 from its predecessors.
+  </div>
+
+  <div class="tldr">
+    <div class="tldr-label">TL;DR</div>
+    <p>Key innovations beyond the vanilla transformer: (1) <strong>Mixture of Experts</strong> — activate only a subset of FFN parameters per token, enabling 1T+ total parameters at 100B-level compute; (2) <strong>Grouped-Query Attention</strong> — fewer KV heads than query heads, slashing KV cache by 4-8×; (3) <strong>FlashAttention</strong> — IO-aware exact attention that's 2-4× faster; (4) <strong>Mamba (SSM)</strong> — attention-free architecture with linear-time inference; (5) <strong>RoPE</strong> — rotary positional embeddings enabling length generalization.</p>
+  </div>
+
+  <h2 id="moe">Mixture of Experts (MoE)</h2>
+  <p>In a dense transformer, <em>every</em> parameter is used for every token. In MoE, the FFN layer is replaced by multiple "expert" FFNs, and a learned <span class="key-term">router</span> activates only a sparse subset per token:</p>
+
+  <div class="math-block">
+    <div class="math-block-header">Sparse MoE Layer</div>
+    <div class="math-block-body">
+      y = Σ<sub>i=1</sub><sup>E</sup> G(x)<sub>i</sub> · FFN<sub>i</sub>(x)<br><br>
+      Where:<br>
+      E = total number of experts (e.g., 8, 16, 64)<br>
+      G(x) = softmax(TopK(x · W<sub>g</sub>)) — router weight for each expert<br>
+      TopK = only the K highest-scoring experts are non-zero (typically K=2)<br>
+      Each token uses only ~2/E of the total expert parameters
+    </div>
+  </div>
+
+  <p><strong>Key benefits:</strong></p>
+  <div class="info-grid">
+    <div class="info-item"><strong>Parameter count</strong>Total parameters can be 4-10× larger than a dense model at the same compute cost</div>
+    <div class="info-item"><strong>Compute cost</strong>FLOPs per token ~2/E × total — a 1T MoE model can cost as much as a 50B dense model</div>
+    <div class="info-item"><strong>Quality</strong>Significantly better perplexity per compute than dense models of equivalent active parameters</div>
+    <div class="info-item"><strong>Memory</strong>All experts must be in memory despite sparse activation (key limitation)</div>
+  </div>
+
+  <div class="widget">
+    <div class="widget-header">📊 Model Size Comparison: Dense vs MoE</div>
+    <div class="widget-body">
+      <canvas id="modelsize-canvas" data-chart="modelsize" width="500" height="180" style="max-width:500px;"></canvas>
+      <p class="widget-desc">MoE models have far more total parameters but similar active (compute) cost to smaller dense models. GPT-4 is estimated to use an 8-expert MoE with ~1.8T total parameters but only ~350B activated per token.</p>
+    </div>
+  </div>
+
+  <h3>Routing Challenges</h3>
+  <p>MoE training introduces unique failure modes:</p>
+  <ul class="content-list">
+    <li><strong>Expert collapse</strong> — all tokens prefer the same expert, defeating sparsity. Mitigated by auxiliary load-balancing loss.</li>
+    <li><strong>Token dropping</strong> — if an expert is over capacity, some tokens get no expert computation. Mitigated by capacity factor (e.g., 1.2× ideal capacity).</li>
+    <li><strong>Batch size requirements</strong> — MoE works best at scale. With few tokens per batch, load balancing is harder.</li>
+  </ul>
+
+  <p><strong>Auxiliary load-balancing loss</strong> adds a penalty proportional to the coefficient of variation of expert assignment:</p>
+  <div class="formula">L<sub>balance</sub> = α · E · Σ<sub>i</sub> f<sub>i</sub> · P<sub>i</sub></div>
+  <p>Where f<sub>i</sub> = fraction of tokens routed to expert i, and P<sub>i</sub> = average routing probability to expert i. When load is perfectly balanced, f<sub>i</sub> = P<sub>i</sub> = 1/E and the loss is minimized.</p>
+
+  <h2 id="gqa">Grouped-Query Attention (GQA)</h2>
+  <p>The standard multi-head attention (MHA) uses <span class="key-term">h</span> heads — each with its own Q, K, V projections → h sets of KV cache per layer. GQA reduces the number of KV heads while keeping all Q heads:</p>
+
+  <table class="styled-table">
+    <thead><tr><th>Attention Variant</th><th>Q Heads</th><th>KV Heads</th><th>KV Cache Size</th><th>Models</th></tr></thead>
+    <tbody>
+      <tr><td>MHA (multi-head)</td><td>h</td><td>h</td><td>Full</td><td>GPT-2, BERT</td></tr>
+      <tr><td>MQA (multi-query)</td><td>h</td><td>1</td><td>1/h</td><td>PaLM, Falcon</td></tr>
+      <tr><td>GQA (grouped-query)</td><td>h</td><td>g (e.g., 8)</td><td>g/h</td><td>LLaMA 2/3, Mistral</td></tr>
+    </tbody>
+  </table>
+
+  <p><span class="key-term">GQA with 8 KV heads</span> reduces KV cache to 25% of MHA while maintaining nearly identical quality. It's the standard in post-2023 models. Each group of Q heads (e.g., 4 Q heads per KV head) shares the same K and V.</p>
+
+  <h2 id="flashattn">FlashAttention</h2>
+  <p>Standard attention materializes the full n×n attention matrix in HBM (GPU memory), which is slow. <span class="key-term">FlashAttention</span> computes attention in tiles that fit in SRAM (fast on-chip memory), never writing the full matrix to HBM:</p>
+
+  <ol class="num-list">
+    <li>Load Q, K, V tiles into SRAM</li>
+    <li>Compute partial attention scores S = QK<sup>T</sup>/√d in SRAM</li>
+    <li>Apply softmax and multiply by V while still in SRAM</li>
+    <li>Accumulate results and write back to HBM</li>
+  </ol>
+
+  <div class="callout">
+    <strong>Speedup:</strong> FlashAttention is 2-4× faster than standard attention for long sequences. More importantly, it's IO-aware — performance is bounded by SRAM→HBM bandwidth, not FLOPs. This makes long-context models practical (FlashAttention-2 achieves ~50% of theoretical HBM bandwidth utilization on H100).
+  </div>
+
+  <h2 id="mamba">Mamba: State Space Models</h2>
+  <p>Mamba (2023) replaces attention entirely with a <span class="key-term">selective state space model (SSM)</span>. Instead of pairwise attention, the model maintains a hidden state that evolves over time:</p>
+
+  <div class="math-block">
+    <div class="math-block-header">Mamba SSM (discretized)</div>
+    <div class="math-block-body">
+      h<sub>t</sub> = Ā(x<sub>t</sub>) · h<sub>t−1</sub> + B̄(x<sub>t</sub>) · x<sub>t</sub><br>
+      y<sub>t</sub> = C(x<sub>t</sub>) · h<sub>t</sub><br><br>
+      Where Ā, B̄ are discretized parameters that depend on the input x<sub>t</sub><br>
+      (this is the "selective" part — the state transition changes per token)
+    </div>
+  </div>
+
+  <p><strong>Key advantage:</strong> inference is O(L) (linear in sequence length) instead of O(L²). For long sequences (1M+ tokens), this is transformative. Mamba-3B matches Transformer-3B on language modeling benchmarks while being faster at inference.</p>
+
+  <p><strong>Trade-offs:</strong> Mamba doesn't have the same in-context learning capabilities as attention-based models at equal scale. Hybrid Mamba-Attention architectures (Jamba, Zamba) combine SSM layers for efficient processing with attention layers for recall-intensive tasks.</p>
+
+  <h2 id="other">Other Notable Innovations</h2>
+
+  <h3>Multi-Token Prediction</h3>
+  <p>Instead of predicting just the next token, predict the next <em>n</em> tokens simultaneously using multiple output heads. This provides a richer training signal and reportedly improves inference-time reasoning. Used in Meta's recent research.</p>
+
+  <h3>NanoGPT-style Sparse Attention</h3>
+  <p>Various approaches to sparsify attention — either by striding (attend to every Nth token), by windowing (attend to only nearby tokens), or by content-based sparsity (learn which tokens to ignore). Reduces O(L²) to O(L√L) or O(L).</p>
+
+  <h3>Self-Play and REINFORCE-style Training</h3>
+  <p>Models learning from their own generated trajectories (e.g., AlphaGo-style for reasoning). The model generates multiple reasoning paths, those that reach the correct answer are reinforced. This has driven major improvements in math and code reasoning.</p>
+
+  <h2 id="summary">What's Next?</h2>
+  <p>The transformer architecture that defined the 2020s is undergoing rapid evolution. State space models challenge its dominance for long-context tasks. MoE enables trillion-parameter models without proportional compute. Hardware-aware algorithms (FlashAttention, kernel fusion) squeeze every bit of GPU utilization.</p>
+
+  <p>The next generation of LLMs will likely combine all of these: <strong>MoE × GQA × FlashAttention × SSM hybrids × multi-token prediction</strong>, all trained with massive-scale data pipelines and alignment techniques that go far beyond simple RLHF.</p>
+
+  <div class="completion-box">
+    <span class="check-icon">✓</span>
+    <span class="check-text">Mark as complete</span>
+  </div>
+
+  <div class="lesson-nav-bottom">
+    <a href="lesson7.html" class="nav-btn prev">← Alignment &amp; Instruction</a>
+  </div>
+</main>
+<script src="assets/chart.js"></script>
+<script src="assets/nav.js"></script>
+</body>
+</html>

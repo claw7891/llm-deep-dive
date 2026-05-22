@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Lesson 5: Inference &amp; Deployment — LLM Deep Dive</title>
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body data-lesson="5">
+
+<nav class="top-nav">
+  <a href="index.html" class="nav-brand"><span class="emoji">🧠</span> LLM Deep Dive</a>
+  <span class="nav-lesson">Lesson 5: Inference &amp; Deployment</span>
+  <button class="menu-btn" aria-label="Lessons">☰</button>
+</nav>
+
+<div class="drawer-overlay"></div>
+<aside class="lesson-drawer">
+  <div class="drawer-header"><h3>Course Syllabus</h3><button class="drawer-close">✕</button></div>
+  <ul class="lesson-list">
+    <li><a href="index.html"><span class="lesson-num">🏠</span>Home</a></li>
+    <li><a href="lesson1.html"><span class="lesson-num">01</span>Tokenization &amp; Embeddings <span class="lesson-check" data-lesson="1"></span></a></li>
+    <li><a href="lesson2.html"><span class="lesson-num">02</span>The Transformer Architecture <span class="lesson-check" data-lesson="2"></span></a></li>
+    <li><a href="lesson3.html"><span class="lesson-num">03</span>Training &amp; Pretraining <span class="lesson-check" data-lesson="3"></span></a></li>
+    <li><a href="lesson4.html"><span class="lesson-num">04</span>Quantization &amp; Compression <span class="lesson-check" data-lesson="4"></span></a></li>
+    <li><a href="lesson5.html" class="active"><span class="lesson-num">05</span>Inference &amp; Deployment <span class="lesson-check" data-lesson="5"></span></a></li>
+    <li><a href="lesson6.html"><span class="lesson-num">06</span>Scaling Laws <span class="lesson-check" data-lesson="6"></span></a></li>
+    <li><a href="lesson7.html"><span class="lesson-num">07</span>Alignment &amp; Instruction <span class="lesson-check" data-lesson="7"></span></a></li>
+    <li><a href="lesson8.html"><span class="lesson-num">08</span>Modern Variants <span class="lesson-check" data-lesson="8"></span></a></li>
+  </ul>
+  <div class="progress-bar"><div class="progress-bar-fill" style="width:0%"></div></div>
+</aside>
+
+<main class="container">
+  <header class="lesson-header">
+    <div class="lesson-meta">Lesson 5 of 8</div>
+    <h1>Inference &amp; Deployment</h1>
+    <p class="lesson-subtitle">The engineering stack behind production LLM serving</p>
+  </header>
+
+  <div class="story-hook">
+    Training a 70B model costs millions, but serving it to millions of users introduces a different set of challenges. The same model takes 20ms to generate the first token (prefill) but can take 100x longer per subsequent token (decode) if not optimized. Understanding the inference stack — KV cache, memory bandwidth, batching, speculative decoding — is essential for anyone deploying LLMs in production.
+  </div>
+
+  <div class="tldr">
+    <div class="tldr-label">TL;DR</div>
+    <p>LLM inference is memory-bandwidth bound, not compute bound. The KV cache grows with sequence length, consuming O(L·d·n_layers·n_heads) memory per request. Key optimizations: (1) KV cache — reuse computed K/V projections, (2) continuous batching — interleave requests at token granularity, (3) speculative decoding — use a small draft model to generate multiple tokens per forward pass, (4) prefix caching — share KV cache across requests with common prefixes. A single H100 serves ~10 concurrent requests on a 70B at 4-bit.</p>
+  </div>
+
+  <h2 id="autoregressive">Autoregressive Generation</h2>
+  <p>LLMs generate one token at a time. Each generated token is fed back as input for the next step:</p>
+
+  <div class="diagram">
+    <div class="diagram-header">Autoregressive Decoding: Prefill + Decode Phases</div>
+    <div class="diagram-body">
+      <svg viewBox="0 0 640 100" style="max-width:640px;">
+        <!-- Prefill phase -->
+        <text x="10" y="22" fill="#a277ff" font-size="10" font-family="system-ui" font-weight="700">Prefill (parallel):</text>
+        <rect x="100" y="8" width="40" height="22" rx="4" fill="#24242a" stroke="#4ecdc4" stroke-width="1.5"/>
+        <text x="120" y="23" fill="#e4e4ec" font-size="9" text-anchor="middle" font-family="monospace">The</text>
+        <rect x="144" y="8" width="40" height="22" rx="4" fill="#24242a" stroke="#4ecdc4" stroke-width="1.5"/>
+        <text x="164" y="23" fill="#e4e4ec" font-size="9" text-anchor="middle" font-family="monospace">cat</text>
+        <rect x="188" y="8" width="40" height="22" rx="4" fill="#24242a" stroke="#4ecdc4" stroke-width="1.5"/>
+        <text x="208" y="23" fill="#e4e4ec" font-size="9" text-anchor="middle" font-family="monospace">sat</text>
+        <line x1="228" y1="19" x2="240" y2="19" stroke="#a277ff" stroke-width="1.5" marker-end="url(#arrow)"/>
+        <rect x="244" y="8" width="60" height="22" rx="4" fill="#24242a" stroke="#ff6b9d" stroke-width="1.5"/>
+        <text x="274" y="23" fill="#ff6b9d" font-size="9" text-anchor="middle" font-family="system-ui">→ Transformer →</text>
+        <line x1="304" y1="19" x2="316" y2="19" stroke="#a277ff" stroke-width="1.5" marker-end="url(#arrow)"/>
+        <rect x="320" y="8" width="40" height="22" rx="4" fill="#24242a" stroke="#ffb347" stroke-width="1.5"/>
+        <text x="340" y="23" fill="#ffb347" font-size="9" text-anchor="middle" font-family="monospace">on</text>
+
+        <!-- Memory icon -->
+        <text x="400" y="23" fill="#9292a4" font-size="12" font-family="system-ui">📝 KV cache filled</text>
+
+        <!-- Decode phase -->
+        <text x="10" y="55" fill="#a277ff" font-size="10" font-family="system-ui" font-weight="700">Decode (sequential):</text>
+        <rect x="100" y="42" width="36" height="22" rx="4" fill="#2a2a35" stroke="#4ecdc4" stroke-width="1" opacity="0.5"/>
+        <text x="118" y="57" fill="#9292a4" font-size="8" text-anchor="middle" font-family="monospace">(4 tokens)</text>
+        <line x1="136" y1="53" x2="148" y2="53" stroke="#a277ff" stroke-width="1" marker-end="url(#arrow)"/>
+        <rect x="152" y="42" width="60" height="22" rx="4" fill="#24242a" stroke="#ff6b9d" stroke-width="1.5"/>
+        <text x="182" y="57" fill="#ff6b9d" font-size="9" text-anchor="middle" font-family="system-ui">→ Transformer →</text>
+        <line x1="212" y1="53" x2="224" y2="53" stroke="#a277ff" stroke-width="1.5" marker-end="url(#arrow)"/>
+        <rect x="228" y="42" width="36" height="22" rx="4" fill="#24242a" stroke="#ffb347" stroke-width="1.5"/>
+        <text x="246" y="57" fill="#ffb347" font-size="9" text-anchor="middle" font-family="monospace">the</text>
+
+        <!-- Arrow pointing to next decode -->
+        <line x1="264" y1="53" x2="290" y2="53" stroke="#9292a4" stroke-width="1" stroke-dasharray="3,2" marker-end="url(#arrow)"/>
+        <rect x="294" y="42" width="36" height="22" rx="4" fill="#24242a" stroke="#4ecdc4" stroke-width="1.5"/>
+        <text x="312" y="57" fill="#e4e4ec" font-size="9" text-anchor="middle" font-family="monospace">mat</text>
+        <line x1="330" y1="53" x2="356" y2="53" stroke="#9292a4" stroke-width="1" stroke-dasharray="3,2" marker-end="url(#arrow)"/>
+        <text x="370" y="57" fill="#9292a4" font-size="9" font-family="system-ui">...</text>
+
+        <!-- KV cache reuse -->
+        <text x="400" y="57" fill="#9292a4" font-size="12" font-family="system-ui">📝 KV cache grows</text>
+      </svg>
+    </div>
+  </div>
+
+  <p>The <span class="key-term">prefill</span> phase processes all input tokens in parallel (one forward pass). The <span class="key-term">decode</span> phase generates tokens one at a time, each requiring a full forward pass. Decode is typically the bottleneck.</p>
+
+  <h2 id="kvcache">The KV Cache</h2>
+  <p>The key optimization for autoregressive decoding: we cache the Key (K) and Value (V) projections from each attention layer, so they don't need to be recomputed at each step:</p>
+
+  <div class="math-block">
+    <div class="math-block-header">KV Cache Memory per Request</div>
+    <div class="math-block-body">
+      Memory = 2 · n<sub>layers</sub> · n<sub>heads</sub> · d<sub>head</sub> · L · bytes<br><br>
+      For a 7B model (n<sub>layers</sub>=32, n<sub>heads</sub>=32, d<sub>head</sub>=128) at FP16:<br>
+      Cache = 2 × 32 × 32 × 128 × 4096 × 2 bytes = 2 GB at 4K context<br>
+      = 16 GB at 32K context<br><br>
+      For a 70B model with 8K context: ~6 GB per request
+    </div>
+  </div>
+
+  <p>At each decode step, we compute Q, K, V for just the <em>new token</em>, append K and V to the cache, then compute attention using the full cache. This avoids O(L²) recomputation per step, reducing it to O(L) per step.</p>
+
+  <div class="callout-warn">
+    The KV cache is the dominant memory consumer at long contexts. For a 70B model serving 32 concurrent requests at 128K context, the KV cache alone requires 32 × 64 GB = 2 TB of memory — far more than the model weights.
+  </div>
+
+  <h2 id="memory-wall">The Memory Bandwidth Wall</h2>
+  <p>LLM inference is fundamentally <span class="key-term">memory-bound</span>, not compute-bound. Each decode step reads the entire model parameters from GPU memory (HBM) into the compute units (SRAM), performs one matrix-vector multiply, and writes the KV cache:</p>
+
+  <table class="styled-table">
+    <thead><tr><th>GPU</th><th>Memory Bandwidth</th><th>70B Read Time</th><th>Compute (1 token)</th></tr></thead>
+    <tbody>
+      <tr><td>H100 SXM</td><td>3,350 GB/s</td><td>~42 ms</td><td>~1 ms</td></tr>
+      <tr><td>A100 SXM</td><td>2,040 GB/s</td><td>~69 ms</td><td>~2 ms</td></tr>
+      <tr><td>A100 PCIe</td><td>1,555 GB/s</td><td>~90 ms</td><td>~2 ms</td></tr>
+      <tr><td>RTX 4090</td><td>1,008 GB/s</td><td>~79 ms (24 GB < 140 GB → requires quantization)</td><td>~3 ms (quantized)</td></tr>
+    </tbody>
+  </table>
+
+  <p>At FP16, a 70B model is ~140 GB. On an H100 (3.35 TB/s), reading all weights takes 140 GB / 3,350 GB/s ≈ 42 ms. This sets a <strong>hard lower bound</strong> on token generation speed — ~24 tokens/second — regardless of compute efficiency.</p>
+
+  <div class="callout-tip">
+    This is why quantization speeds up inference disproportionately: at 4-bit, the 70B model is 35 GB instead of 140 GB, reducing the read time from 42 ms to 10 ms — a 4× speedup on the exact same compute operations.
+  </div>
+
+  <h2 id="batching">Continuous Batching</h2>
+  <p>Naive batching (wait for all requests to finish before starting new ones) is inefficient for LLMs because generation lengths vary widely. <span class="key-term">Continuous batching</span> (used by vLLM, TGI) interleaves tokens from different requests at each step:</p>
+
+  <ol class="num-list">
+    <li>System receives requests A, B, C at different times</li>
+    <li>Each step: prefill new requests + decode ongoing requests in a single batch</li>
+    <li>Finished requests (e.g., short generation) exit the batch immediately</li>
+    <li>KV caches are paged (PagedAttention) — allocated in fixed-size blocks to avoid fragmentation and support sharing across requests with common prefixes</li>
+  </ol>
+
+  <div class="callout">
+    <strong>PagedAttention (vLLM):</strong> Inspired by virtual memory in operating systems. The KV cache is divided into fixed-size "pages." Logical pages can map to non-contiguous physical memory, eliminating fragmentation and enabling efficient sharing of common prefixes (e.g., system prompts, few-shot examples).
+  </div>
+
+  <h2 id="speculative">Speculative Decoding</h2>
+  <p>A technique that generates multiple tokens per forward pass of the large model by using a small <span class="key-term">draft model</span>:</p>
+
+  <ol class="num-list">
+    <li>Draft model (e.g., 1B parameters) generates K candidate tokens autoregressively (fast — small model = less memory bandwidth)</li>
+    <li>Large model (e.g., 70B) validates all K tokens in a single forward pass using a modified attention mask</li>
+    <li>Tokens that match the large model's distribution are accepted; the rest are corrected and the process repeats</li>
+  </ol>
+
+  <p>Typical acceptance rate: 70-90% with a well-aligned draft model → 2-3× throughput improvement at no loss of quality (since all outputs are validated by the large model).</p>
+
+  <h2 id="production">Production Serving Stack</h2>
+  <p>A production LLM inference system typically combines:</p>
+  <table class="styled-table">
+    <thead><tr><th>Component</th><th>Purpose</th><th>Popular Implementation</th></tr></thead>
+    <tbody>
+      <tr><td>Serving framework</td><td>Continuous batching, KV cache management</td><td>vLLM, TGI, TensorRT-LLM</td></tr>
+      <tr><td>Quantization backend</td><td>Low-precision inference kernels</td><td>AWQ, GPTQ, bitsandbytes, TensorRT</td></tr>
+      <tr><td>Request router</td><td>Load balancing, rate limiting, failover</td><td>Envoy, NGINX, custom</td></tr>
+      <tr><td>Prefix cache</td><td>Shared KV cache across requests (system prompts)</td><td>SGLang, vLLM RadixAttention</td></tr>
+      <tr><td>GPU orchestration</td><td>Tensor/pipeline parallelism across GPUs</td><td>NCCL, Megatron, Ray</td></tr>
+    </tbody>
+  </table>
+
+  <div class="completion-box">
+    <span class="check-icon">✓</span>
+    <span class="check-text">Mark as complete</span>
+  </div>
+
+  <div class="lesson-nav-bottom">
+    <a href="lesson4.html" class="nav-btn prev">← Quantization &amp; Compression</a>
+    <a href="lesson6.html" class="nav-btn next">Lesson 6: Scaling Laws →</a>
+  </div>
+</main>
+<script src="assets/nav.js"></script>
+</body>
+</html>

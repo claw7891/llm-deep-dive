@@ -1,0 +1,215 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Lesson 4: Quantization &amp; Model Compression — LLM Deep Dive</title>
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body data-lesson="4">
+
+<nav class="top-nav">
+  <a href="index.html" class="nav-brand"><span class="emoji">🧠</span> LLM Deep Dive</a>
+  <span class="nav-lesson">Lesson 4: Quantization &amp; Compression</span>
+  <button class="menu-btn" aria-label="Lessons">☰</button>
+</nav>
+
+<div class="drawer-overlay"></div>
+<aside class="lesson-drawer">
+  <div class="drawer-header"><h3>Course Syllabus</h3><button class="drawer-close">✕</button></div>
+  <ul class="lesson-list">
+    <li><a href="index.html"><span class="lesson-num">🏠</span>Home</a></li>
+    <li><a href="lesson1.html"><span class="lesson-num">01</span>Tokenization &amp; Embeddings <span class="lesson-check" data-lesson="1"></span></a></li>
+    <li><a href="lesson2.html"><span class="lesson-num">02</span>The Transformer Architecture <span class="lesson-check" data-lesson="2"></span></a></li>
+    <li><a href="lesson3.html"><span class="lesson-num">03</span>Training &amp; Pretraining <span class="lesson-check" data-lesson="3"></span></a></li>
+    <li><a href="lesson4.html" class="active"><span class="lesson-num">04</span>Quantization &amp; Compression <span class="lesson-check" data-lesson="4"></span></a></li>
+    <li><a href="lesson5.html"><span class="lesson-num">05</span>Inference &amp; Deployment <span class="lesson-check" data-lesson="5"></span></a></li>
+    <li><a href="lesson6.html"><span class="lesson-num">06</span>Scaling Laws <span class="lesson-check" data-lesson="6"></span></a></li>
+    <li><a href="lesson7.html"><span class="lesson-num">07</span>Alignment &amp; Instruction <span class="lesson-check" data-lesson="7"></span></a></li>
+    <li><a href="lesson8.html"><span class="lesson-num">08</span>Modern Variants <span class="lesson-check" data-lesson="8"></span></a></li>
+  </ul>
+  <div class="progress-bar"><div class="progress-bar-fill" style="width:0%"></div></div>
+</aside>
+
+<main class="container">
+  <header class="lesson-header">
+    <div class="lesson-meta">Lesson 4 of 8</div>
+    <h1>Quantization &amp; Model Compression</h1>
+    <p class="lesson-subtitle">How to shrink models 4× without destroying quality</p>
+  </header>
+
+  <div class="story-hook">
+    A 70B-parameter model at FP32 precision requires 280 GB of GPU memory — more than a single H100 (80 GB) can hold. Yet you can run a 70B model on a single GPU if you quantize it to 4-bit (35 GB). How does dropping 75% of the precision not destroy the model? The answer lies in understanding what model weights actually encode, and how quantization exploits the structure of neural network parameters.
+  </div>
+
+  <div class="tldr">
+    <div class="tldr-label">TL;DR</div>
+    <p>Quantization reduces the precision of model weights and/or activations, typically from 16-bit floating point to 8-bit integers or 4-bit normalized floats. Memory drops linearly with bits (4× for FP16 → 4-bit). Quality degradation depends on the method: round-to-nearest works for INT8; GPTQ, AWQ, and NF4 formats are needed for 4-bit. Weights in large models are surprisingly robust to precision loss because they have high redundancy.</p>
+  </div>
+
+  <h2 id="why-quant">Why Quantization Works</h2>
+  <p>Neural network weights have two key properties that make quantization feasible:</p>
+  <ul class="content-list">
+    <li><strong>Overparameterization</strong> — models have far more parameters than needed; small perturbations to individual weights don't change the output much</li>
+    <li><strong>Weight distribution</strong> — most weights are small/near-zero; only a few outliers carry most of the signal</li>
+  </ul>
+  <p>The loss landscape near a trained minimum is surprisingly flat in many directions — you can move individual weights quite far before model quality measurably degrades.</p>
+
+  <h2 id="precision">Precision Formats</h2>
+
+  <table class="styled-table">
+    <thead><tr><th>Format</th><th>Bits</th><th>Memory per 7B</th><th>Typical Use</th></tr></thead>
+    <tbody>
+      <tr><td>FP32 (float32)</td><td>32</td><td>28 GB</td><td>Training, reference baseline</td></tr>
+      <tr><td>FP16 / BF16</td><td>16</td><td>14 GB</td><td>Training, inference</td></tr>
+      <tr><td>INT8</td><td>8</td><td>7 GB</td><td>Inference (minimal quality loss)</td></tr>
+      <tr><td>INT4 / NF4</td><td>4</td><td>3.5 GB</td><td>Inference (slight quality loss)</td></tr>
+      <tr><td>FP8 (E4M3, E5M2)</td><td>8</td><td>7 GB</td><td>FP8 training (H100 GPUs)</td></tr>
+    </tbody>
+  </table>
+
+  <h2 id="comparison">Size vs Quality Trade-off</h2>
+
+  <div class="widget">
+    <div class="widget-header">📊 Quantization Impact: Size vs Quality</div>
+    <div class="widget-body">
+      <div class="widget-controls">
+        <label>Precision:
+          <select id="quant-select" onchange="window.drawQuantChart('quant-canvas', this.value)">
+            <option value="BF16">BF16 (baseline)</option>
+            <option value="INT8">INT8</option>
+            <option value="INT4">INT4 (standard)</option>
+            <option value="NF4">NF4 (normal float 4)</option>
+          </select>
+        </label>
+      </div>
+      <canvas id="quant-canvas" data-chart="quant" data-param="BF16" width="380" height="200" style="max-width:380px;margin:0.5rem auto;"></canvas>
+      <p class="widget-desc">NF4 maintains ~95% of FP32 quality at 12.5% the model size. INT4 drops to ~93%. Quality measurements vary by task — reasoning benchmarks degrade faster than simple QA.</p>
+    </div>
+  </div>
+
+  <h2 id="ptq">Post-Training Quantization (PTQ)</h2>
+  <p>The most practical approach: take a pretrained model and quantize its weights without any retraining.</p>
+
+  <h3>Round-to-Nearest (RTN)</h3>
+  <p>The simplest method. For each weight w, find the closest representable value q in the target format:</p>
+  <div class="formula">q = clamp(round(w / s), Q<sub>min</sub>, Q<sub>max</sub>) · s</div>
+  <p>Where s = scale factor (max(|w|) / Q<sub>max</sub>) and Q<sub>min</sub>, Q<sub>max</sub> bound the target integer range.</p>
+  <p>Works well for INT8 (negligible quality loss) but degrades significantly at 4-bit because many weights map to the same quantized value, losing distinguishing information.</p>
+
+  <h3>GPTQ (Generative Pre-Trained Transformer Quantization)</h3>
+  <p>Obtains significantly better 4-bit results by solving an optimization problem. Instead of rounding each weight independently, GPTQ adjusts <em>remaining</em> weights to compensate for the error introduced by quantizing earlier weights:</p>
+  <ol class="num-list">
+    <li>Select a weight column to quantize</li>
+    <li>Quantize it via rounding</li>
+    <li>Compute the reconstruction error</li>
+    <li>Update the remaining (unquantized) weights in that row to cancel the error</li>
+    <li>Move to the next column</li>
+  </ol>
+  <p>Uses a small calibration dataset (~128 sequences) to compute optimal compensation. State-of-the-art for 4-bit quantization.</p>
+
+  <h3>AWQ (Activation-Aware Weight Quantization)</h3>
+  <p>Recognizes that not all weight channels are equally important. Weights corresponding to activations with large magnitudes contribute more to output quality and should be quantized with higher precision:</p>
+  <ol class="num-list">
+    <li>Compute activation statistics from calibration data</li>
+    <li>Identify "salient" channels (activations with high magnitude)</li>
+    <li>Scale up salient channels before quantization (preserves their precision)</li>
+    <li>Scale other channels down (allows more aggressive quantization without increasing average error)</li>
+  </ol>
+  <p>AWQ achieves similar quality to GPTQ but is faster to compute and has better hardware utilization during inference.</p>
+
+  <h2 id="formats">4-bit Data Formats</h2>
+
+  <p>Standard INT4 has 16 evenly spaced values: {−8, −7, ..., 7}. But neural network weights follow a roughly normal distribution (centered at 0, bell-shaped). <span class="key-term">NF4 (Normal Float 4)</span> uses a non-uniform distribution that allocates more quantization levels near zero, where most weights live:</p>
+
+  <div class="diagram">
+    <div class="diagram-header">INT4 vs NF4 Quantization Levels</div>
+    <div class="diagram-body">
+      <svg viewBox="0 0 440 100" style="max-width:440px;">
+        <!-- INT4 levels (evenly spaced) -->
+        <text x="10" y="18" fill="#9292a4" font-size="10" font-family="system-ui">INT4:</text>
+        <rect x="50" y="4" width="370" height="12" rx="2" fill="#2a2a35"/>
+        <g fill="#ff6b9d">
+          <rect x="52" y="2" width="4" height="16" rx="1"/>
+          <rect x="76" y="2" width="4" height="16" rx="1"/>
+          <rect x="100" y="2" width="4" height="16" rx="1"/>
+          <rect x="124" y="2" width="4" height="16" rx="1"/>
+          <rect x="148" y="2" width="4" height="16" rx="1"/>
+          <rect x="172" y="2" width="4" height="16" rx="1"/>
+          <rect x="196" y="2" width="4" height="16" rx="1"/>
+          <rect x="220" y="2" width="4" height="16" rx="1"/>
+          <rect x="244" y="2" width="4" height="16" rx="1"/>
+          <rect x="268" y="2" width="4" height="16" rx="1"/>
+          <rect x="292" y="2" width="4" height="16" rx="1"/>
+          <rect x="316" y="2" width="4" height="16" rx="1"/>
+          <rect x="340" y="2" width="4" height="16" rx="1"/>
+          <rect x="364" y="2" width="4" height="16" rx="1"/>
+          <rect x="388" y="2" width="4" height="16" rx="1"/>
+          <rect x="412" y="2" width="4" height="16" rx="1"/>
+        </g>
+        <text x="220" y="34" fill="#9292a4" font-size="9" text-anchor="middle" font-family="system-ui">Equal spacing → wastes precision near zero</text>
+
+        <!-- NF4 levels (denser near center) -->
+        <text x="10" y="58" fill="#9292a4" font-size="10" font-family="system-ui">NF4:</text>
+        <rect x="50" y="44" width="370" height="12" rx="2" fill="#2a2a35"/>
+        <g fill="#4ecdc4">
+          <rect x="52" y="42" width="4" height="16" rx="1"/>
+          <rect x="64" y="42" width="4" height="16" rx="1"/>
+          <rect x="80" y="42" width="4" height="16" rx="1"/>
+          <rect x="100" y="42" width="4" height="16" rx="1"/>
+          <rect x="140" y="42" width="4" height="16" rx="1"/>
+          <rect x="180" y="42" width="4" height="16" rx="1"/>
+          <rect x="202" y="42" width="4" height="16" rx="1"/>
+          <rect x="215" y="42" width="4" height="16" rx="1"/>
+          <rect x="225" y="42" width="4" height="16" rx="1"/>
+          <rect x="238" y="42" width="4" height="16" rx="1"/>
+          <rect x="260" y="42" width="4" height="16" rx="1"/>
+          <rect x="300" y="42" width="4" height="16" rx="1"/>
+          <rect x="340" y="42" width="4" height="16" rx="1"/>
+          <rect x="360" y="42" width="4" height="16" rx="1"/>
+          <rect x="376" y="42" width="4" height="16" rx="1"/>
+          <rect x="388" y="42" width="4" height="16" rx="1"/>
+        </g>
+        <text x="220" y="75" fill="#9292a4" font-size="9" text-anchor="middle" font-family="system-ui">More levels near zero → preserves small weights</text>
+
+        <!-- Gaussian bell curve -->
+        <path d="M80,90 Q140,55 220,40 Q300,55 360,90" fill="none" stroke="#a277ff" stroke-width="1.5" opacity="0.5"/>
+        <text x="395" y="64" fill="#a277ff" font-size="9" font-family="system-ui">weight distribution</text>
+      </svg>
+    </div>
+  </div>
+
+  <h2 id="qat">Quantization-Aware Training (QAT)</h2>
+  <p>For the best quality at very low precision (2–3 bits), train with simulated quantization in the forward pass:</p>
+  <ol class="num-list">
+    <li>Insert fake quantization nodes after each weight in the computation graph</li>
+    <li>Forward pass uses quantized weights and activations</li>
+    <li>Backward pass uses straight-through estimator (STE) — gradient flows through the quantization operation as if it were the identity</li>
+    <li>After training, replace with real quantization</li>
+  </ol>
+  <p>QAT is expensive (requires training from scratch or continued pretraining) but can recover most quality lost at 4-bit and below.</p>
+
+  <h2 id="summary">Summary</h2>
+  <ul class="content-list">
+    <li><strong>Quantoization</strong> reduces memory proportionally to bits, with INT8 → 50%, INT4 → 25% of FP16 size</li>
+    <li><strong>INT8 RTN</strong> works for most models with negligible quality loss</li>
+    <li><strong>4-bit</strong> requires sophisticated methods: GPTQ (optimal compensation) or AWQ (activation-aware scaling)</li>
+    <li><strong>NF4</strong> (normal float) gives better 4-bit quality than INT4 by matching weight distribution</li>
+    <li><strong>QAT</strong> (quantization-aware training) recovers additional quality but requires retraining</li>
+  </ul>
+
+  <div class="completion-box">
+    <span class="check-icon">✓</span>
+    <span class="check-text">Mark as complete</span>
+  </div>
+
+  <div class="lesson-nav-bottom">
+    <a href="lesson3.html" class="nav-btn prev">← Training &amp; Pretraining</a>
+    <a href="lesson5.html" class="nav-btn next">Lesson 5: Inference &amp; Deployment →</a>
+  </div>
+</main>
+
+<script src="assets/chart.js"></script>
+<script src="assets/nav.js"></script>
+</body>
+</html>

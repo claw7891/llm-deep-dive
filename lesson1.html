@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Lesson 1: Tokenization &amp; Embeddings — LLM Deep Dive</title>
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body data-lesson="1">
+
+<nav class="top-nav">
+  <a href="index.html" class="nav-brand"><span class="emoji">🧠</span> LLM Deep Dive</a>
+  <span class="nav-lesson">Lesson 1: Tokenization &amp; Embeddings</span>
+  <button class="menu-btn" aria-label="Lessons">☰</button>
+</nav>
+
+<div class="drawer-overlay"></div>
+<aside class="lesson-drawer">
+  <div class="drawer-header"><h3>Course Syllabus</h3><button class="drawer-close">✕</button></div>
+  <ul class="lesson-list">
+    <li><a href="index.html"><span class="lesson-num">🏠</span>Home</a></li>
+    <li><a href="lesson1.html" class="active"><span class="lesson-num">01</span>Tokenization &amp; Embeddings <span class="lesson-check" data-lesson="1"></span></a></li>
+    <li><a href="lesson2.html"><span class="lesson-num">02</span>The Transformer Architecture <span class="lesson-check" data-lesson="2"></span></a></li>
+    <li><a href="lesson3.html"><span class="lesson-num">03</span>Training &amp; Pretraining <span class="lesson-check" data-lesson="3"></span></a></li>
+    <li><a href="lesson4.html"><span class="lesson-num">04</span>Quantization &amp; Compression <span class="lesson-check" data-lesson="4"></span></a></li>
+    <li><a href="lesson5.html"><span class="lesson-num">05</span>Inference &amp; Deployment <span class="lesson-check" data-lesson="5"></span></a></li>
+    <li><a href="lesson6.html"><span class="lesson-num">06</span>Scaling Laws <span class="lesson-check" data-lesson="6"></span></a></li>
+    <li><a href="lesson7.html"><span class="lesson-num">07</span>Alignment &amp; Instruction <span class="lesson-check" data-lesson="7"></span></a></li>
+    <li><a href="lesson8.html"><span class="lesson-num">08</span>Modern Variants <span class="lesson-check" data-lesson="8"></span></a></li>
+  </ul>
+  <div class="progress-bar"><div class="progress-bar-fill" style="width:0%"></div></div>
+</aside>
+
+<main class="container">
+  <header class="lesson-header">
+    <div class="lesson-meta">Lesson 1 of 8</div>
+    <h1>Tokenization &amp; Embeddings</h1>
+    <p class="lesson-subtitle">How raw text becomes vectors that transformers can process</p>
+  </header>
+
+  <div class="story-hook">
+    Before any attention happens or any parameter is updated, raw text must be converted into numerical form. This step — <strong>tokenization</strong> — is deceptively consequential: it defines the model's vocabulary, affects its ability to handle rare or unseen words, and can introduce subtle biases. Understanding the tokenizer is often the first diagnostic step when an LLM behaves unexpectedly.
+  </div>
+
+  <h2 id="tokenization">The Tokenization Pipeline</h2>
+
+  <p>Every LLM processes text through this pipeline:</p>
+
+  <div class="diagram">
+    <div class="diagram-header">Text → Tokens → Token IDs → Embeddings → Model Input</div>
+    <div class="diagram-body">
+      <svg viewBox="0 0 680 90" style="width:100%;max-width:680px;">
+        <defs>
+          <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+            <path d="M0,0 L10,5 L0,10 Z" fill="#a277ff"/>
+          </marker>
+        </defs>
+        <rect x="10" y="20" width="130" height="50" rx="10" fill="#24242a" stroke="#a277ff" stroke-width="1.5"/>
+        <text x="75" y="48" fill="#e4e4ec" font-size="11" text-anchor="middle" font-family="system-ui">"The cat sat"</text>
+        <text x="75" y="62" fill="#9292a4" font-size="9" text-anchor="middle" font-family="system-ui">Raw text</text>
+
+        <line x1="140" y1="45" x2="175" y2="45" stroke="#a277ff" stroke-width="2" marker-end="url(#arrow)"/>
+
+        <rect x="180" y="20" width="110" height="50" rx="10" fill="#24242a" stroke="#4ecdc4" stroke-width="1.5"/>
+        <text x="235" y="45" fill="#e4e4ec" font-size="11" text-anchor="middle" font-family="monospace">[The] [cat] [sat]</text>
+        <text x="235" y="62" fill="#9292a4" font-size="9" text-anchor="middle" font-family="system-ui">Tokens</text>
+
+        <line x1="290" y1="45" x2="325" y2="45" stroke="#a277ff" stroke-width="2" marker-end="url(#arrow)"/>
+
+        <rect x="330" y="20" width="110" height="50" rx="10" fill="#24242a" stroke="#ff6b9d" stroke-width="1.5"/>
+        <text x="385" y="45" fill="#e4e4ec" font-size="11" text-anchor="middle" font-family="monospace">[464] [824] [1089]</text>
+        <text x="385" y="62" fill="#9292a4" font-size="9" text-anchor="middle" font-family="system-ui">Token IDs</text>
+
+        <line x1="440" y1="45" x2="475" y2="45" stroke="#a277ff" stroke-width="2" marker-end="url(#arrow)"/>
+
+        <rect x="480" y="20" width="120" height="50" rx="10" fill="#24242a" stroke="#4ecdc4" stroke-width="1.5"/>
+        <text x="540" y="45" fill="#e4e4ec" font-size="11" text-anchor="middle" font-family="monospace">[d×768] [d×768] [d×768]</text>
+        <text x="540" y="62" fill="#9292a4" font-size="9" text-anchor="middle" font-family="system-ui">Embeddings</text>
+
+        <line x1="600" y1="45" x2="635" y2="45" stroke="#a277ff" stroke-width="2" marker-end="url(#arrow)"/>
+
+        <rect x="640" y="20" width="35" height="50" rx="10" fill="#24242a" stroke="#ffb347" stroke-width="1.5"/>
+        <text x="657" y="48" fill="#e4e4ec" font-size="14" text-anchor="middle" font-family="system-ui">🧠</text>
+      </svg>
+    </div>
+  </div>
+
+  <h2 id="subword" style="clear:both;">Subword Tokenization</h2>
+
+  <p>Modern LLMs don't tokenize by words (too many), characters (too long), or whitespace (misses morphology). Instead they use <span class="key-term">subword tokenization</span> — breaking text into the most frequent character sequences in the training data.</p>
+
+  <h3>Byte-Pair Encoding (BPE)</h3>
+  <p>Used by GPT models. The algorithm iteratively merges the most frequent byte pair:</p>
+
+  <ol class="num-list">
+    <li>Start with individual characters/bytes as the vocabulary</li>
+    <li>Count all adjacent pairs in the training corpus</li>
+    <li>Merge the most frequent pair into a new token</li>
+    <li>Repeat until desired vocabulary size is reached (e.g., 50k, 100k)</li>
+  </ol>
+
+  <div class="math-block">
+    <div class="math-block-header">BPE Merge Example</div>
+    <div class="math-block-body">
+      Corpus: "low low low low low lowest lowest lowest wider wider wider"<br><br>
+      Step 1: l o w (3 tokens) + whitespace<br>
+      Step 2: "lo" is most frequent pair → merge → token: lo<br>
+      Step 3: "low" is most frequent → merge → token: low<br>
+      Step 4: "lowest" = low + est → merge → token: lowest<br>
+      Step 5: "wider" = wid + er → merge → token: wider<br><br>
+      Result: Vocabulary = {l, o, w, e, s, t, i, d, r, lo, low, est, lowest, wid, er, wider}
+    </div>
+  </div>
+
+  <h3>WordPiece (BERT)</h3>
+  <p>Similar to BPE but merges pairs that maximize the likelihood of the training data under a language model, rather than by raw frequency:</p>
+
+  <div class="formula">score(x, y) = P(xy) / (P(x) · P(y))</div>
+
+  <p>Where P(x) is the unigram probability of token x. Pairs that appear together more often than expected by chance get merged.</p>
+
+  <h3>SentencePiece (LLaMA, Gemma)</h3>
+  <p>Treats the input as a raw byte stream (no pretokenization needed), allowing it to handle any Unicode character, digit, or whitespace without language-specific preprocessing. Often uses the <span class="key-term">Unigram language model</span> objective for segmentation.</p>
+
+  <h2 id="vocab">Vocabulary Size &amp; Compression</h2>
+
+  <p>Vocabulary size is a key architectural decision that impacts both model quality and efficiency:</p>
+
+  <table class="styled-table">
+    <thead>
+      <tr><th>Model</th><th>Tokenizer</th><th>Vocab Size</th><th>Compression</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>GPT-2</td><td>BPE</td><td>50,257</td><td>~3.5 chars/token</td></tr>
+      <tr><td>BERT</td><td>WordPiece</td><td>30,522</td><td>~4.0 chars/token</td></tr>
+      <tr><td>LLaMA 3</td><td>SentencePiece (BPE)</td><td>128,000</td><td>~5.2 chars/token</td></tr>
+      <tr><td>GPT-4</td><td>cl100k_base (BPE)</td><td>100,256</td><td>~4.0 chars/token</td></tr>
+    </tbody>
+  </table>
+
+  <p><strong>Compression ratio</strong> — characters per token — measures how efficiently the tokenizer packs information. Higher compression means fewer tokens for the same text, which reduces sequence length and thus attention computation cost (which scales O(L²)).</p>
+
+  <div class="callout-warn">
+    <strong>Tokenization artifacts:</strong> BPE can split unexpected words in ways that affect model performance. For example, "cowboy" might be tokenized as "cow" + "boy" (which is sensible) or "c" + "owboy" (problematic). Words seen fewer times in training get fragmented more, which is why LLMs struggle with unusual names, technical jargon, and code.
+  </div>
+
+  <h2 id="embeddings">Token Embeddings</h2>
+
+  <p>After tokenization, each token ID is mapped to a dense vector via an <span class="key-term">embedding matrix</span> E ∈ ℝ<sup>V×d</sup>, where V is vocabulary size and d is the embedding dimension (typically 768–8192).</p>
+
+  <div class="formula">x<sub>i</sub> = E[t<sub>i</sub>]</div>
+
+  <p>The embedding matrix is <span class="key-term">learned from scratch</span> during pretraining. Each row of E is a trainable parameter representing one token in d-dimensional space. Semantically similar tokens (e.g., "king" and "queen") end up with similar vectors — the model learns this organically from co-occurrence patterns in text.</p>
+
+  <div class="callout">
+    <strong>Embedding arithmetic:</strong> The classic example is <em>king</em> − <em>man</em> + <em>woman</em> ≈ <em>queen</em>. While less clean for subword tokenizers, high-quality embeddings still encode rich semantic relationships in their vector geometry.
+  </div>
+
+  <h2 id="positional">Positional Encodings</h2>
+
+  <p>Self-attention is permutation-invariant: <span class="key-term">Attention(Q,K,V)</span> processes all tokens identically regardless of order. We must inject position information explicitly.</p>
+
+  <h3>Sinusoidal (Original Transformer)</h3>
+  <div class="math-block">
+    <div class="math-block-header">Positional Encoding Formula</div>
+    <div class="math-block-body">
+      PE(pos, 2i)   = sin(pos / 10000<sup>2i/d</sup>)<br>
+      PE(pos, 2i+1) = cos(pos / 10000<sup>2i/d</sup>)
+    </div>
+  </div>
+  <p>Each position gets a unique encoding. Different dimensions have different frequencies, allowing the model to attend to relative offsets rather than absolute positions.</p>
+
+  <h3>RoPE (Rotary Position Embedding)</h3>
+  <p>Used in LLaMA, Mistral, Gemma. Instead of adding positional vectors, RoPE <span class="key-term">rotates</span> the query and key vectors by an angle proportional to position:</p>
+  <div class="formula">q<sub>i</sub> ← R(θ · pos) · q<sub>i</sub> &nbsp; k<sub>j</sub> ← R(θ · pos) · k<sub>j</sub></div>
+  <p>The dot product q<sub>i</sub> · k<sub>j</sub> then naturally encodes <span class="key-term">relative position</span> — the attention score depends only on the offset i − j, not absolute positions. This lets models generalize to longer sequences than they were trained on.</p>
+
+  <h3>ALiBi (Attention with Linear Biases)</h3>
+  <p>Instead of modifying embeddings, ALiBi adds a bias to attention scores based on the distance between tokens:</p>
+  <div class="formula">score(q<sub>i</sub>, k<sub>j</sub>) = q<sub>i</sub> · k<sub>j</sub> − m · |i − j|</div>
+  <p>Where m is a head-specific slope. Simpler than RoPE, used in BLOOM and some MPT models.</p>
+
+  <h2 id="summary">Summary</h2>
+  <p>The journey from text to model input involves:</p>
+  <ul class="content-list">
+    <li><strong>Subword tokenization</strong> (BPE, WordPiece, SentencePiece) balancing vocabulary size and compression</li>
+    <li><strong>Token IDs</strong> mapped through a learned <strong>embedding matrix</strong> to dense vectors</li>
+    <li><strong>Positional encodings</strong> (sinusoidal, RoPE, ALiBi) injecting sequence order information</li>
+    <li>The resulting <strong>d×n tensor</strong> (n tokens, d dimensions) is the transformer input</li>
+  </ul>
+
+  <div class="completion-box">
+    <span class="check-icon">✓</span>
+    <span class="check-text">Mark as complete</span>
+  </div>
+
+  <div class="lesson-nav-bottom">
+    <a href="index.html" class="nav-btn prev">← Home</a>
+    <a href="lesson2.html" class="nav-btn next">Lesson 2: The Transformer Architecture →</a>
+  </div>
+</main>
+
+<script src="assets/nav.js"></script>
+</body>
+</html>

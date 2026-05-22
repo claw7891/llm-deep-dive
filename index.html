@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>LLM Deep Dive: A Rigorous Foundation</title>
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+
+<nav class="top-nav">
+  <a href="index.html" class="nav-brand"><span class="emoji">🧠</span> LLM Deep Dive</a>
+  <span class="nav-lesson">A Rigorous Foundation</span>
+  <button class="menu-btn" aria-label="Lessons">☰</button>
+</nav>
+
+<div class="drawer-overlay"></div>
+<aside class="lesson-drawer">
+  <div class="drawer-header"><h3>Course Syllabus</h3><button class="drawer-close">✕</button></div>
+  <ul class="lesson-list">
+    <li><a href="index.html" class="active"><span class="lesson-num">🏠</span>Home</a></li>
+    <li><a href="lesson1.html"><span class="lesson-num">01</span>Tokenization &amp; Embeddings <span class="lesson-check" data-lesson="1"></span></a></li>
+    <li><a href="lesson2.html"><span class="lesson-num">02</span>The Transformer Architecture <span class="lesson-check" data-lesson="2"></span></a></li>
+    <li><a href="lesson3.html"><span class="lesson-num">03</span>Training &amp; Pretraining <span class="lesson-check" data-lesson="3"></span></a></li>
+    <li><a href="lesson4.html"><span class="lesson-num">04</span>Quantization &amp; Compression <span class="lesson-check" data-lesson="4"></span></a></li>
+    <li><a href="lesson5.html"><span class="lesson-num">05</span>Inference &amp; Deployment <span class="lesson-check" data-lesson="5"></span></a></li>
+    <li><a href="lesson6.html"><span class="lesson-num">06</span>Scaling Laws <span class="lesson-check" data-lesson="6"></span></a></li>
+    <li><a href="lesson7.html"><span class="lesson-num">07</span>Alignment &amp; Instruction <span class="lesson-check" data-lesson="7"></span></a></li>
+    <li><a href="lesson8.html"><span class="lesson-num">08</span>Modern Variants <span class="lesson-check" data-lesson="8"></span></a></li>
+  </ul>
+  <div class="progress-bar"><div class="progress-bar-fill" style="width:0%"></div></div>
+</aside>
+
+<main class="container">
+  <header class="lesson-header">
+    <div class="lesson-meta">8-Lesson Course</div>
+    <h1>LLM Deep Dive:<br><span class="sub">A Rigorous Foundation</span></h1>
+    <p class="lesson-subtitle">From tokenization to modern architecture variants — the algorithms, math, and data behind large language models</p>
+  </header>
+
+  <div class="story-hook">
+    The "LLM Math Primer" gave you the vocabulary. This course gives you the <strong>engineering</strong> — the actual algorithms, data structures, and mathematical machinery that make LLMs work. Each lesson combines symbolic notation, architectural diagrams, interactive charts, and real data to build a grounded understanding of how modern LLMs are built, trained, compressed, and deployed.
+  </div>
+
+  <div class="tldr">
+    <div class="tldr-label">TL;DR</div>
+    <p>8 lessons covering the core technical foundations of modern LLMs: <strong>Lesson 1</strong> — how tokenization and embeddings turn text into vectors; <strong>Lesson 2</strong> — the full transformer architecture with attention math; <strong>Lesson 3</strong> — pretraining objectives, data pipelines, and loss dynamics; <strong>Lesson 4</strong> — quantization techniques (INT8, NF4, GPTQ) and model compression; <strong>Lesson 5</strong> — inference optimization (KV cache, speculative decoding, batching); <strong>Lesson 6</strong> — scaling laws with empirical data; <strong>Lesson 7</strong> — RLHF, DPO, and instruction tuning; <strong>Lesson 8</strong> — modern innovations (MoE, Mamba, GQA, RoPE, FlashAttention).</p>
+  </div>
+
+  <h2>Syllabus</h2>
+
+  <div class="section-card">
+    <div class="section-card-header"><h3 style="margin:0;font-size:1.05rem;color:var(--accent)">Lesson 1: Tokenization &amp; Embeddings</h3></div>
+    <div class="section-card-body">
+      <p>How raw text becomes numerical representations. Byte-Pair Encoding, WordPiece, SentencePiece tokenizers. Learned embeddings, positional encodings (sinusoidal, RoPE, ALiBi). Subword ambiguity and tokenization artifacts.</p>
+    </div>
+  </div>
+
+  <div class="section-card">
+    <div class="section-card-header"><h3 style="margin:0;font-size:1.05rem;color:var(--accent)">Lesson 2: The Transformer Architecture</h3></div>
+    <div class="section-card-body">
+      <p>Complete architecture breakdown with symbolic notation. Scaled dot-product attention, multi-head attention, encoder vs decoder vs encoder-decoder. Layer norm, residual connections, FFN equations. Architectural diagram with data flow.</p>
+    </div>
+  </div>
+
+  <div class="section-card">
+    <div class="section-card-header"><h3 style="margin:0;font-size:1.05rem;color:var(--accent)">Lesson 3: Training &amp; Pretraining</h3></div>
+    <div class="section-card-body">
+      <p>Pretraining objectives (causal LM, masked LM, permutation LM). Data curation pipelines, deduplication, quality filtering. Training dynamics — loss curves, learning rate schedules, batch size scaling. Compute budgets and training costs.</p>
+    </div>
+  </div>
+
+  <div class="section-card">
+    <div class="section-card-header"><h3 style="margin:0;font-size:1.05rem;color:var(--accent)">Lesson 4: Quantization &amp; Model Compression</h3></div>
+    <div class="section-card-body">
+      <p>Why quantization works. INT8, INT4, NF4 formats. Post-training quantization (GPTQ, AWQ) vs quantization-aware training. Impact on model size, quality, and inference speed. Interactive chart comparing precision/quality/size trade-offs.</p>
+    </div>
+  </div>
+
+  <div class="section-card">
+    <div class="section-card-header"><h3 style="margin:0;font-size:1.05rem;color:var(--accent)">Lesson 5: Inference &amp; Deployment</h3></div>
+    <div class="section-card-body">
+      <p>The inference stack: KV cache mechanism, memory bandwidth wall, speculative decoding, continuous batching, prefix caching. Throughput vs latency trade-offs. GPU memory budgeting for production serving.</p>
+    </div>
+  </div>
+
+  <div class="section-card">
+    <div class="section-card-header"><h3 style="margin:0;font-size:1.05rem;color:var(--accent)">Lesson 6: Scaling Laws</h3></div>
+    <div class="section-card-body">
+      <p>Kaplan et al. and Chinchilla scaling laws with empirical data. Power-law relationships between compute/data/parameters/performance. Optimal allocation for compute budgets. Interactive scaling law chart with real data points.</p>
+    </div>
+  </div>
+
+  <div class="section-card">
+    <div class="section-card-header"><h3 style="margin:0;font-size:1.05rem;color:var(--accent)">Lesson 7: Alignment &amp; Instruction Tuning</h3></div>
+    <div class="section-card-body">
+      <p>From pretraining to helpful assistant. Instruction tuning datasets, Supervised Fine-Tuning (SFT). RLHF — reward modeling, PPO. DPO — direct preference optimization. Constitutional AI and the alignment tax.</p>
+    </div>
+  </div>
+
+  <div class="section-card">
+    <div class="section-card-header"><h3 style="margin:0;font-size:1.05rem;color:var(--accent)">Lesson 8: Modern Architecture Variants</h3></div>
+    <div class="section-card-body">
+      <p>Beyond the vanilla transformer. Mixture of Experts (MoE) — routing, load balancing, expert capacity. Grouped-Query Attention (GQA), Multi-Query Attention (MQA). RoPE embeddings. Mamba — state space models for linear-time inference. FlashAttention — IO-aware exact attention.</p>
+    </div>
+  </div>
+
+  <div style="text-align:center;margin-top:2.5rem;">
+    <a href="lesson1.html" class="nav-btn next" style="display:inline-flex;font-size:1.05rem;padding:0.75rem 1.5rem;">
+      Start Lesson 1 →
+    </a>
+  </div>
+</main>
+
+<script src="assets/nav.js"></script>
+</body>
+</html>

@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Lesson 3: Training &amp; Pretraining — LLM Deep Dive</title>
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body data-lesson="3">
+
+<nav class="top-nav">
+  <a href="index.html" class="nav-brand"><span class="emoji">🧠</span> LLM Deep Dive</a>
+  <span class="nav-lesson">Lesson 3: Training &amp; Pretraining</span>
+  <button class="menu-btn" aria-label="Lessons">☰</button>
+</nav>
+
+<div class="drawer-overlay"></div>
+<aside class="lesson-drawer">
+  <div class="drawer-header"><h3>Course Syllabus</h3><button class="drawer-close">✕</button></div>
+  <ul class="lesson-list">
+    <li><a href="index.html"><span class="lesson-num">🏠</span>Home</a></li>
+    <li><a href="lesson1.html"><span class="lesson-num">01</span>Tokenization &amp; Embeddings <span class="lesson-check" data-lesson="1"></span></a></li>
+    <li><a href="lesson2.html"><span class="lesson-num">02</span>The Transformer Architecture <span class="lesson-check" data-lesson="2"></span></a></li>
+    <li><a href="lesson3.html" class="active"><span class="lesson-num">03</span>Training &amp; Pretraining <span class="lesson-check" data-lesson="3"></span></a></li>
+    <li><a href="lesson4.html"><span class="lesson-num">04</span>Quantization &amp; Compression <span class="lesson-check" data-lesson="4"></span></a></li>
+    <li><a href="lesson5.html"><span class="lesson-num">05</span>Inference &amp; Deployment <span class="lesson-check" data-lesson="5"></span></a></li>
+    <li><a href="lesson6.html"><span class="lesson-num">06</span>Scaling Laws <span class="lesson-check" data-lesson="6"></span></a></li>
+    <li><a href="lesson7.html"><span class="lesson-num">07</span>Alignment &amp; Instruction <span class="lesson-check" data-lesson="7"></span></a></li>
+    <li><a href="lesson8.html"><span class="lesson-num">08</span>Modern Variants <span class="lesson-check" data-lesson="8"></span></a></li>
+  </ul>
+  <div class="progress-bar"><div class="progress-bar-fill" style="width:0%"></div></div>
+</aside>
+
+<main class="container">
+  <header class="lesson-header">
+    <div class="lesson-meta">Lesson 3 of 8</div>
+    <h1>Training &amp; Pretraining</h1>
+    <p class="lesson-subtitle">Training objectives, data pipelines, training dynamics, and compute budgets</p>
+  </header>
+
+  <div class="story-hook">
+    Pretraining an LLM is the largest engineering effort in machine learning. A single training run on a 70B-parameter model consumes thousands of GPUs for months, costs tens of millions of dollars, and processes trillions of tokens. Understanding the training process is essential for knowing what these models actually learn — and what they miss.
+  </div>
+
+  <div class="tldr">
+    <div class="tldr-label">TL;DR</div>
+    <p>LLMs are trained on trillions of tokens of internet text using next-token prediction (autoregressive language modeling). The loss is cross-entropy between predicted and actual next token. Training uses distributed data parallelism across thousands of GPUs, AdamW optimizer with cosine learning rate schedule, and gradient clipping. Data quality matters as much as quantity — deduplication, filtering, and curation are critical.</p>
+  </div>
+
+  <h2 id="objectives">Pretraining Objectives</h2>
+
+  <h3>Autoregressive / Causal Language Modeling</h3>
+  <p>The dominant objective for generative LLMs (GPT, LLaMA, etc.). Given a sequence of tokens x₁, x₂, ..., xₙ, maximize the probability of each token given all <em>previous</em> tokens:</p>
+
+  <div class="math-block">
+    <div class="math-block-header">Autoregressive LM Objective</div>
+    <div class="math-block-body">
+      L = −Σ<sub>t=1</sub><sup>T</sup> log P(x<sub>t</sub> | x<sub>1</sub>, x<sub>2</sub>, ..., x<sub>t−1</sub>)
+    </div>
+  </div>
+
+  <p>This is simply the negative log-likelihood of the entire sequence under the model. Minimizing this loss is equivalent to maximizing the probability the model assigns to the training data.</p>
+
+  <h3>Masked Language Modeling</h3>
+  <p>Used by BERT and other encoder-only models. Randomly mask 15% of tokens and predict them from bidirectional context:</p>
+  <div class="formula">L = −Σ<sub>t ∈ masked</sub> log P(x<sub>t</sub> | x<sub>≠t</sub>)</div>
+
+  <h2 id="data">Data Curation Pipeline</h2>
+  <p>Raw internet text is noisy, duplicated, and often low-quality. Modern pretraining pipelines apply extensive filtering:</p>
+
+  <div class="info-grid">
+    <div class="info-item"><strong>Deduplication</strong>Remove near-duplicate documents (MinHash LSH), duplicate n-gram sequences</div>
+    <div class="info-item"><strong>Quality filtering</strong>Heuristic rules (perplexity thresholds), classifier-based (fastText, CCNet), domain filtering</div>
+    <div class="info-item"><strong>Toxicity</strong>Blocklist URLs, hate speech classifiers, PII redaction</div>
+    <div class="info-item"><strong>Data mixing</strong>Weighted sampling: web text + books + code + academic papers</div>
+  </div>
+
+  <p>The LLaMA 3 dataset (15T+ tokens) was curated by training a small language model to score document quality and filtering based on those scores. High-quality data (books, academic papers) is upsampled; low-quality web text is downsampled or discarded.</p>
+
+  <h3>Typical Data Mix (LLaMA 2)</h3>
+  <table class="styled-table">
+    <thead><tr><th>Data Source</th><th>Fraction</th><th>Epochs</th></tr></thead>
+    <tbody>
+      <tr><td>CommonCrawl (web)</td><td>67%</td><td>1.1</td></tr>
+      <tr><td>C4 (curated web)</td><td>15%</td><td>1.1</td></tr>
+      <tr><td>Wikipedia</td><td>4.5%</td><td>2.9</td></tr>
+      <tr><td>Books</td><td>4.5%</td><td>2.3</td></tr>
+      <tr><td>ArXiv (science)</td><td>2.5%</td><td>1.5</td></tr>
+      <tr><td>Stack Exchange (QA)</td><td>2.0%</td><td>2.0</td></tr>
+      <tr><td>GitHub (code)</td><td>4.5%</td><td>1.0</td></tr>
+    </tbody>
+  </table>
+
+  <h2 id="optimization">Training Optimization</h2>
+
+  <h3>Optimizer: AdamW</h3>
+  <p>AdamW is the standard optimizer for LLM training. It combines momentum (for fast convergence) with adaptive learning rates (for handling sparse gradients) and decoupled weight decay:</p>
+
+  <div class="math-block">
+    <div class="math-block-header">AdamW Update (per parameter θ)</div>
+    <div class="math-block-body">
+      m<sub>t</sub> = β₁ · m<sub>t−1</sub> + (1 − β₁) · g<sub>t</sub> &nbsp; (biased first moment)<br>
+      v<sub>t</sub> = β₂ · v<sub>t−1</sub> + (1 − β₂) · g<sub>t</sub>² &nbsp; (biased second moment)<br><br>
+      m̂<sub>t</sub> = m<sub>t</sub> / (1 − β₁ᵗ) &nbsp; (bias correction)<br>
+      v̂<sub>t</sub> = v<sub>t</sub> / (1 − β₂ᵗ) &nbsp; (bias correction)<br><br>
+      θ<sub>t</sub> = θ<sub>t−1</sub> − η · m̂<sub>t</sub> / (√v̂<sub>t</sub> + ε) − λ · η · θ<sub>t−1</sub>
+    </div>
+  </div>
+  <p>Typical hyperparameters: β₁ = 0.9, β₂ = 0.95, ε = 10⁻⁸, weight decay λ = 0.1</p>
+
+  <h3>Learning Rate Schedule: Cosine Decay</h3>
+  <p>The learning rate follows a cosine curve: linear warmup from 0 to max_lr over the first ~2,000 steps, then cosine decay to ~10% of max_lr over the remaining steps:</p>
+  <div class="formula">η(t) = η<sub>max</sub> · ½(1 + cos(π · t / T)) &nbsp; (after warmup)</div>
+  <p>This schedule allows the model to "settle" into a good minimum — high LR early for fast exploration, low LR later for fine-grained convergence.</p>
+
+  <h2 id="batch">Batch Size Scaling</h2>
+  <p>LLM training uses very large batch sizes (millions of tokens per batch) and scales the learning rate with batch size according to empirical heuristics:</p>
+
+  <div class="formula">η(B) = η<sub>ref</sub> · √(B / B<sub>ref</sub>) &nbsp; (or linear scaling for small batches)</div>
+
+  <p>LLaMA 2 70B trained with a batch size of 4M tokens across 2,000 GPUs. Each step processes 4M tokens, and the model saw 2T tokens total → 500,000 training steps.</p>
+
+  <h2 id="compute">Compute Budget</h2>
+  <p>Training compute is measured in <span class="key-term">FLOPs</span> (floating-point operations). For a forward and backward pass on a single token with a dense transformer:</p>
+  <div class="formula">C<sub>train</sub> ≈ 6 · N · D</div>
+  <p>Where N = number of parameters, D = number of training tokens. The factor 6 comes from: ~2 FLOPs/parameter/token for forward pass + ~4 FLOPs/parameter/token for backward pass.</p>
+
+  <table class="styled-table">
+    <thead><tr><th>Model</th><th>Parameters</th><th>Tokens</th><th>Train FLOPs</th><th>GPU·hours</th><th>Estimated cost</th></tr></thead>
+    <tbody>
+      <tr><td>GPT-3</td><td>175B</td><td>300B</td><td>3.2 × 10²³</td><td>~3.6M A100-hrs</td><td>~$4.6M</td></tr>
+      <tr><td>LLaMA 2 7B</td><td>7B</td><td>2T</td><td>8.4 × 10²²</td><td>~184K A100-hrs</td><td>~$230K</td></tr>
+      <tr><td>LLaMA 2 70B</td><td>70B</td><td>2T</td><td>8.4 × 10²³</td><td>~1.7M A100-hrs</td><td>~$2.2M</td></tr>
+      <tr><td>GPT-4 (estimated)</td><td>~1.8T</td><td>~13T</td><td>~1.4 × 10²⁵</td><td>~50-100M H100-hrs</td><td>~$100-200M</td></tr>
+    </tbody>
+  </table>
+
+  <h2 id="distributed">Distributed Training</h2>
+  <p>Training a 70B model requires more memory than a single GPU can hold. Three levels of parallelism are combined:</p>
+  <ul class="content-list">
+    <li><strong>Data parallelism</strong> — each GPU processes different micro-batches, gradients are averaged all-reduce</li>
+    <li><strong>Tensor parallelism</strong> — individual matrix multiplies are split across GPUs (Megatron-LM style)</li>
+    <li><strong>Pipeline parallelism</strong> — different layers are assigned to different GPUs (GPipe/1F1B style)</li>
+  </ul>
+
+  <div class="callout">
+    <strong>ZeRO (Zero Redundancy Optimizer):</strong> An optimization that shards optimizer states, gradients, and parameters across GPUs, eliminating redundant copies. ZeRO-3 enables training 100B+ models on thousands of GPUs with near-linear scaling efficiency.
+  </div>
+
+  <h2 id="convergence">Convergence &amp; Loss Curves</h2>
+  <p>During training, the loss decreases following a power law with the number of tokens seen. A typical training run shows smooth decay with occasional spikes from data quality issues or numerical instability:</p>
+
+  <div class="math-block">
+    <div class="math-block-header">Scaling relationship during training</div>
+    <div class="math-block-body">
+      L(D) ≈ L<sub>∞</sub> + A · D<sup>−α</sup><br><br>
+      Where:<br>
+      L(D) = loss after D tokens of training<br>
+      L<sub>∞</sub> = irreducible loss (entropy of natural language)<br>
+      A, α = constants (α ≈ 0.1-0.3 for most LLMs)
+    </div>
+  </div>
+
+  <p>Gradient clipping (|g| ≤ 1.0), learning rate warmup, and skipping problematic batches all help maintain stable training curves.</p>
+
+  <div class="completion-box">
+    <span class="check-icon">✓</span>
+    <span class="check-text">Mark as complete</span>
+  </div>
+
+  <div class="lesson-nav-bottom">
+    <a href="lesson2.html" class="nav-btn prev">← Transformer Architecture</a>
+    <a href="lesson4.html" class="nav-btn next">Lesson 4: Quantization &amp; Compression →</a>
+  </div>
+</main>
+
+<script src="assets/nav.js"></script>
+</body>
+</html>

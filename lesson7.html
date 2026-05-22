@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Lesson 7: Alignment &amp; Instruction Tuning — LLM Deep Dive</title>
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body data-lesson="7">
+
+<nav class="top-nav">
+  <a href="index.html" class="nav-brand"><span class="emoji">🧠</span> LLM Deep Dive</a>
+  <span class="nav-lesson">Lesson 7: Alignment &amp; Instruction Tuning</span>
+  <button class="menu-btn" aria-label="Lessons">☰</button>
+</nav>
+
+<div class="drawer-overlay"></div>
+<aside class="lesson-drawer">
+  <div class="drawer-header"><h3>Course Syllabus</h3><button class="drawer-close">✕</button></div>
+  <ul class="lesson-list">
+    <li><a href="index.html"><span class="lesson-num">🏠</span>Home</a></li>
+    <li><a href="lesson1.html"><span class="lesson-num">01</span>Tokenization &amp; Embeddings <span class="lesson-check" data-lesson="1"></span></a></li>
+    <li><a href="lesson2.html"><span class="lesson-num">02</span>The Transformer Architecture <span class="lesson-check" data-lesson="2"></span></a></li>
+    <li><a href="lesson3.html"><span class="lesson-num">03</span>Training &amp; Pretraining <span class="lesson-check" data-lesson="3"></span></a></li>
+    <li><a href="lesson4.html"><span class="lesson-num">04</span>Quantization &amp; Compression <span class="lesson-check" data-lesson="4"></span></a></li>
+    <li><a href="lesson5.html"><span class="lesson-num">05</span>Inference &amp; Deployment <span class="lesson-check" data-lesson="5"></span></a></li>
+    <li><a href="lesson6.html"><span class="lesson-num">06</span>Scaling Laws <span class="lesson-check" data-lesson="6"></span></a></li>
+    <li><a href="lesson7.html" class="active"><span class="lesson-num">07</span>Alignment &amp; Instruction <span class="lesson-check" data-lesson="7"></span></a></li>
+    <li><a href="lesson8.html"><span class="lesson-num">08</span>Modern Variants <span class="lesson-check" data-lesson="8"></span></a></li>
+  </ul>
+  <div class="progress-bar"><div class="progress-bar-fill" style="width:0%"></div></div>
+</aside>
+
+<main class="container">
+  <header class="lesson-header">
+    <div class="lesson-meta">Lesson 7 of 8</div>
+    <h1>Alignment &amp; Instruction Tuning</h1>
+    <p class="lesson-subtitle">From raw internet-text predictor to helpful, harmless assistant</p>
+  </header>
+
+  <div class="story-hook">
+    A raw pretrained LLM completes sentences — it doesn't answer questions helpfully. It might continue "What is the capital of France?" with "is a question that many people ask" rather than "Paris." Alignment is the process of reshaping the model's behavior to be <strong>helpful, honest, and harmless</strong>. It's a fundamentally different training paradigm — instead of maximizing likelihood of training data, we're optimizing for human preferences.
+  </div>
+
+  <div class="tldr">
+    <div class="tldr-label">TL;DR</div>
+    <p>Alignment has three main stages: (1) <strong>Supervised Fine-Tuning (SFT)</strong> — train on human-written instruction-response pairs to teach format and style; (2) <strong>Reward Modeling</strong> — train a separate model to predict human preferences; (3) <strong>Reinforcement Learning (RLHF/PPO)</strong> — use the reward model to further optimize the LLM's policy. DPO (Direct Preference Optimization) achieves similar results without the separate reward model by directly optimizing on pairwise preference data.</p>
+  </div>
+
+  <h2 id="sft">Stage 1: Supervised Fine-Tuning (SFT)</h2>
+  <p>The first alignment step. Collect a dataset of high-quality instruction-response pairs (typically 10k-100k examples) and fine-tune the model with standard cross-entropy loss:</p>
+
+  <div class="formula">L<sub>SFT</sub> = −Σ<sub>i</sub> log P<sub>θ</sub>(response<sub>i</sub> | instruction<sub>i</sub>)</div>
+
+  <p>SFT teaches the model the <strong>format</strong> of a helpful conversation — that it should answer questions, acknowledge uncertainty, and follow instructions. But it has limitations:</p>
+  <ul class="content-list">
+    <li>Quality depends entirely on the SFT dataset — bad demonstrations teach bad behavior</li>
+    <li>Models learn to <em>mimic</em> the style of demonstrations without deep understanding</li>
+    <li>SFT data is expensive to collect (human-written, quality-controlled)</li>
+  </ul>
+
+  <p>The key insight: SFT alone is necessary but not sufficient. The model learns format but not <span class="key-term">preference</span> — it can't distinguish a good answer from a great one.</p>
+
+  <h2 id="rlhf">Stage 2: Reinforcement Learning from Human Feedback</h2>
+  <p>RLHF goes beyond imitation to directly optimize for human preferences:</p>
+
+  <div class="diagram">
+    <div class="diagram-header">RLHF Pipeline</div>
+    <div class="diagram-body">
+      <svg viewBox="0 0 530 140" style="max-width:530px;">
+        <!-- Step 1: Collect comparisons -->
+        <text x="10" y="20" fill="#a277ff" font-size="10" font-family="system-ui" font-weight="700">1. Collect human preferences</text>
+        <rect x="200" y="4" width="130" height="22" rx="6" fill="#24242a" stroke="#4ecdc4" stroke-width="1.5"/>
+        <text x="265" y="19" fill="#4ecdc4" font-size="9" text-anchor="middle" font-family="system-ui">A vs B comparisons</text>
+
+        <!-- Step 2: Train reward model -->
+        <text x="10" y="55" fill="#a277ff" font-size="10" font-family="system-ui" font-weight="700">2. Train Reward Model</text>
+        <rect x="200" y="38" width="130" height="22" rx="6" fill="#24242a" stroke="#ff6b9d" stroke-width="1.5"/>
+        <text x="265" y="53" fill="#ff6b9d" font-size="9" text-anchor="middle" font-family="system-ui">r<sub>θ</sub>(x, y)</text>
+        <line x1="55" y1="26" x2="55" y2="38" stroke="#a277ff" stroke-width="1"/>
+
+        <!-- Step 3: Optimize policy -->
+        <text x="10" y="92" fill="#a277ff" font-size="10" font-family="system-ui" font-weight="700">3. Optimize LLM (PPO)</text>
+        <rect x="200" y="78" width="130" height="22" rx="6" fill="#24242a" stroke="#ffb347" stroke-width="1.5"/>
+        <text x="265" y="93" fill="#ffb347" font-size="9" text-anchor="middle" font-family="system-ui">π<sub>θ</sub> via PPO</text>
+        <line x1="55" y1="60" x2="55" y2="78" stroke="#a277ff" stroke-width="1"/>
+
+        <!-- Arrows between stages -->
+        <line x1="330" y1="15" x2="370" y2="15" stroke="#9292a4" stroke-width="1" marker-end="url(#arrow)"/>
+        <line x1="330" y1="49" x2="370" y2="49" stroke="#9292a4" stroke-width="1" marker-end="url(#arrow)"/>
+
+        <!-- Feedback loop -->
+        <text x="400" y="20" fill="#9292a4" font-size="9" font-family="system-ui">Preference label</text>
+        <text x="400" y="49" fill="#9292a4" font-size="9" font-family="system-ui">Reward signal</text>
+        <text x="400" y="88" fill="#9292a4" font-size="9" font-family="system-ui">Policy update</text>
+
+        <!-- Loop back arrow -->
+        <path d="M200,89 Q165,89 165,49 Q165,15 200,15" fill="none" stroke="#ffb347" stroke-width="1" stroke-dasharray="4,2" marker-end="url(#arrow)"/>
+      </svg>
+    </div>
+  </div>
+
+  <h3>Reward Model Training</h3>
+  <p>Train a separate model r<sub>φ</sub>(x, y) — typically initialized from the SFT model with the language modeling head replaced by a scalar head — to predict human preferences. For a pair of responses (y<sub>1</sub>, y<sub>2</sub>) given input x, where y<sub>1</sub> is preferred over y<sub>2</sub>:</p>
+
+  <div class="math-block">
+    <div class="math-block-header">Reward Model Loss (Bradley-Terry)</div>
+    <div class="math-block-body">
+      Loss = −log σ(r<sub>φ</sub>(x, y<sub>1</sub>) − r<sub>φ</sub>(x, y<sub>2</sub>))<br><br>
+      Where σ is the sigmoid function.<br>
+      The model learns to assign higher scores to preferred responses.
+    </div>
+  </div>
+
+  <p>Typically trained on ~100k-1M human preference comparisons. The reward model should generalize to responses it hasn't seen — predicting what humans <em>would</em> prefer.</p>
+
+  <h3>Policy Optimization (PPO)</h3>
+  <p>Use the reward model to fine-tune the LLM policy π<sub>θ</sub>. At each step, sample a response from the current policy and score it with the reward model:</p>
+
+  <div class="math-block">
+    <div class="math-block-header">PPO Objective (simplified)</div>
+    <div class="math-block-body">
+      L<sub>PPO</sub> = E<sub>y ∼ π<sub>θ</sub></sub>[ r<sub>φ</sub>(x, y) − β · KL(π<sub>θ</sub> || π<sub>ref</sub>) ]<br><br>
+      Where:<br>
+      r<sub>φ</sub>(x, y) = reward model score<br>
+      KL penalty prevents the policy from diverging too far from the SFT model<br>
+      β controls the strength of the KL penalty (typically 0.01-0.1)
+    </div>
+  </div>
+
+  <p>The KL penalty is <span class="key-term">essential</span>. Without it, the policy can learn to exploit the reward model — finding responses that score highly but are gibberish or contain artifacts. The KL constraint keeps the optimized policy close to the well-behaved SFT model while still improving according to the reward signal.</p>
+
+  <h2 id="dpo">DPO: Direct Preference Optimization</h2>
+  <p>DPO eliminates the need for a separate reward model by directly optimizing the policy on preference pairs:</p>
+
+  <div class="math-block">
+    <div class="math-block-header">DPO Loss</div>
+    <div class="math-block-body">
+      L<sub>DPO</sub> = −log σ(β · log(π<sub>θ</sub>(y<sub>w</sub>|x) / π<sub>ref</sub>(y<sub>w</sub>|x)) − β · log(π<sub>θ</sub>(y<sub>l</sub>|x) / π<sub>ref</sub>(y<sub>l</sub>|x)))<br><br>
+      Where y<sub>w</sub> = preferred response, y<sub>l</sub> = dispreferred response, π<sub>ref</sub> is the reference (SFT) model.
+    </div>
+  </div>
+
+  <p>Intuition: increase the relative probability of preferred responses vs dispreferred responses, while staying close to the reference model. DPO is simpler, cheaper, and often matches or exceeds RLHF quality — making it the preferred method in many recent alignment pipelines.</p>
+
+  <h2 id="techniques">Practical Alignment Techniques</h2>
+
+  <table class="styled-table">
+    <thead><tr><th>Technique</th><th>Data Required</th><th>Complexity</th><th>Used By</th></tr></thead>
+    <tbody>
+      <tr><td>SFT</td><td>Single response per prompt</td><td>Low</td><td>Almost all models</td></tr>
+      <tr><td>RLHF (PPO)</td><td>Comparisons + reward model</td><td>High</td><td>GPT-4, Claude, Gemini</td></tr>
+      <tr><td>DPO</td><td>Comparisons only</td><td>Medium</td><td>LLaMA 3, Mistral, Zephyr</td></tr>
+      <tr><td>KTO</td><td>Binary feedback (good/bad)</td><td>Low</td><td>Some open models</td></tr>
+      <tr><td>Constitutional AI</td><td>Self-critique + revision</td><td>Medium</td><td>Claude (Anthropic)</td></tr>
+    </tbody>
+  </table>
+
+  <h3>The Alignment Tax</h3>
+  <p>Alignment often degrades performance on <span class="key-term">capability benchmarks</span> — the model becomes more helpful and harmless but worse at math, coding, or reasoning. This is thought to happen because:</p>
+  <ul class="content-list">
+    <li>The alignment dataset biases the model toward certain response styles that aren't optimal for all tasks</li>
+    <li>The KL penalty prevents the model from exploring better reasoning strategies</li>
+    <li>Preference data might favor plausible-sounding wrong answers over correct but dry ones</li>
+  </ul>
+
+  <p>Mitigations include: balanced capability retention data during alignment, rejection sampling (use a stronger model to score candidates), and multi-task learning that mixes alignment and pretraining objectives.</p>
+
+  <div class="completion-box">
+    <span class="check-icon">✓</span>
+    <span class="check-text">Mark as complete</span>
+  </div>
+
+  <div class="lesson-nav-bottom">
+    <a href="lesson6.html" class="nav-btn prev">← Scaling Laws</a>
+    <a href="lesson8.html" class="nav-btn next">Lesson 8: Modern Variants →</a>
+  </div>
+</main>
+<script src="assets/nav.js"></script>
+</body>
+</html>
