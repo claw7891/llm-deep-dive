@@ -38,132 +38,290 @@
     <p class="lesson-subtitle">The engineering stack behind production LLM serving</p>
   </header>
 
+  <!-- ==================== STORY HOOK ==================== -->
   <div class="story-hook">
-    Training a 70B model costs millions, but serving it to millions of users introduces a different set of challenges. The same model takes 20ms to generate the first token (prefill) but can take 100x longer per subsequent token (decode) if not optimized. Understanding the inference stack — KV cache, memory bandwidth, batching, speculative decoding — is essential for anyone deploying LLMs in production.
+    <p>Training a 70B model costs millions of dollars in compute, but <strong>serving</strong> it to millions of users introduces a different set of challenges. The same model takes about 20 ms to generate the <em>first</em> token (the prefill phase) but can take 50–100× longer per subsequent token (the decode phase) if not optimized.</p>
+    <p>Why? Because each new token requires reading <em>all 140 GB of model weights</em> from GPU memory — and that memory transfer is surprisingly slow compared to how fast the GPU can compute. Understanding the inference stack — KV cache, memory bandwidth, batching, speculative decoding — is essential for anyone deploying LLMs in production.</p>
+    <p>By the end of this lesson, you'll understand why a 7B model runs easily on a laptop while a 70B needs a datacenter, and what techniques production systems use to squeeze every last token per second out of their hardware.</p>
   </div>
 
   <div class="tldr">
     <div class="tldr-label">TL;DR</div>
-    <p>LLM inference is memory-bandwidth bound, not compute bound. The KV cache grows with sequence length, consuming O(L·d·n_layers·n_heads) memory per request. Key optimizations: (1) KV cache — reuse computed K/V projections, (2) continuous batching — interleave requests at token granularity, (3) speculative decoding — use a small draft model to generate multiple tokens per forward pass, (4) prefix caching — share KV cache across requests with common prefixes. A single H100 serves ~10 concurrent requests on a 70B at 4-bit.</p>
+    <p>LLM inference is <strong>memory-bandwidth bound</strong>, not compute bound. The KV cache grows with sequence length, consuming O(L·d·n_layers·n_heads) memory per request. Key optimizations: (1) <strong>KV cache</strong> — reuse computed K/V projections so each step only processes one new token, (2) <strong>continuous batching</strong> — interleave requests at token granularity instead of waiting for full sequences, (3) <strong>speculative decoding</strong> — use a small draft model to generate multiple tokens per forward pass of the large model, (4) <strong>prefix caching</strong> — share KV cache across requests with common prefixes like system prompts. A single H100 serves ~10 concurrent requests on a 70B at 4-bit.</p>
   </div>
 
+  <!-- ==================== AUTOREGRESSIVE GENERATION ==================== -->
   <h2 id="autoregressive">Autoregressive Generation</h2>
-  <p>LLMs generate one token at a time. Each generated token is fed back as input for the next step:</p>
+  <p>LLMs generate text one token at a time. Each generated token is fed back as input for the next step. This is called <span class="key-term">autoregressive</span> generation — the model's output becomes part of its next input.</p>
+
+  <h3>Token-by-Token Walkthrough</h3>
+  <p>Let's trace what happens when generating <strong>"The cat sat on the mat"</strong>:</p>
+
+  <div class="math-block">
+    <div class="math-block-header">Step-by-Step Generation</div>
+    <div class="math-block-body" style="font-family:monospace; font-size:13px;">
+  <strong>Prompt:</strong> "Translate to English: Le chat s'est assis sur le tapin"<br><br>
+  <strong>Step 1 (Prefill):</strong>  Input tokens = [Le, chat, s'est, assis, sur, le, tapin]<br>
+    &nbsp;&nbsp;&nbsp;&nbsp;→ Processed in <em>parallel</em> (one forward pass)<br>
+    &nbsp;&nbsp;&nbsp;&nbsp;→ Output: "The" (first generated token)<br><br>
+  <strong>Step 2 (Decode):</strong> Input = [Le, chat, ..., tapin, The]<br>
+    &nbsp;&nbsp;&nbsp;&nbsp;→ Full forward pass through ALL 32 transformer layers<br>
+    &nbsp;&nbsp;&nbsp;&nbsp;→ Output: "cat"<br><br>
+  <strong>Step 3 (Decode):</strong> Input = [..., The, cat]<br>
+    &nbsp;&nbsp;&nbsp;&nbsp;→ Full forward pass through ALL 32 layers<br>
+    &nbsp;&nbsp;&nbsp;&nbsp;→ Output: "sat"<br><br>
+  <strong>Step 4 (Decode):</strong> Input = [..., The, cat, sat]<br>
+    &nbsp;&nbsp;&nbsp;&nbsp;→ Full forward pass through ALL 32 layers<br>
+    &nbsp;&nbsp;&nbsp;&nbsp;→ Output: "on"<br><br>
+  <strong>Step 5 (Decode):</strong> Input = [..., The, cat, sat, on]<br>
+    &nbsp;&nbsp;&nbsp;&nbsp;→ Full forward pass through ALL 32 layers<br>
+    &nbsp;&nbsp;&nbsp;&nbsp;→ Output: "the"<br><br>
+  <strong>Step 6 (Decode):</strong> Input = [..., The, cat, sat, on, the]<br>
+    &nbsp;&nbsp;&nbsp;&nbsp;→ Full forward pass through ALL 32 layers<br>
+    &nbsp;&nbsp;&nbsp;&nbsp;→ Output: "mat"<br><br>
+  <strong>Step 7 (Decode):</strong> Input = [..., The, cat, sat, on, the, mat]<br>
+    &nbsp;&nbsp;&nbsp;&nbsp;→ Full forward pass through ALL 32 layers<br>
+    &nbsp;&nbsp;&nbsp;&nbsp;→ Output: "."<br><br>
+  <strong>Result:</strong> 1 prefill step + 6 decode steps = 7 forward passes total<br>
+  <em>Each decode step is equally expensive (all 32 layers, all 70B parameters),<br>even though the input grew by only 1 token!</em>
+    </div>
+  </div>
+
+  <p>The <span class="key-term">prefill</span> phase processes all input tokens in parallel (one forward pass). The <span class="key-term">decode</span> phase generates tokens one at a time, each requiring a full forward pass. Decode is typically the bottleneck — it's what makes LLMs feel "slow" when you're watching them type.</p>
 
   <div class="diagram">
     <div class="diagram-header">Autoregressive Decoding: Prefill + Decode Phases</div>
     <div class="diagram-body">
-      <svg viewBox="0 0 640 100" style="max-width:640px;">
+      <svg viewBox="0 0 400 120" style="width:100%;max-width:400px;height:auto;">
+        <defs>
+          <marker id="arr5" viewBox="0 0 10 10" refX="5" refY="5" markerWidth="5" markerHeight="5" orient="auto">
+            <path d="M0,0 L10,5 L0,10" fill="#a277ff"/>
+          </marker>
+        </defs>
         <!-- Prefill phase -->
         <text x="10" y="22" fill="#a277ff" font-size="10" font-family="system-ui" font-weight="700">Prefill (parallel):</text>
-        <rect x="100" y="8" width="40" height="22" rx="4" fill="#24242a" stroke="#4ecdc4" stroke-width="1.5"/>
-        <text x="120" y="23" fill="#e4e4ec" font-size="9" text-anchor="middle" font-family="monospace">The</text>
-        <rect x="144" y="8" width="40" height="22" rx="4" fill="#24242a" stroke="#4ecdc4" stroke-width="1.5"/>
-        <text x="164" y="23" fill="#e4e4ec" font-size="9" text-anchor="middle" font-family="monospace">cat</text>
-        <rect x="188" y="8" width="40" height="22" rx="4" fill="#24242a" stroke="#4ecdc4" stroke-width="1.5"/>
-        <text x="208" y="23" fill="#e4e4ec" font-size="9" text-anchor="middle" font-family="monospace">sat</text>
-        <line x1="228" y1="19" x2="240" y2="19" stroke="#a277ff" stroke-width="1.5" marker-end="url(#arrow)"/>
-        <rect x="244" y="8" width="60" height="22" rx="4" fill="#24242a" stroke="#ff6b9d" stroke-width="1.5"/>
-        <text x="274" y="23" fill="#ff6b9d" font-size="9" text-anchor="middle" font-family="system-ui">→ Transformer →</text>
-        <line x1="304" y1="19" x2="316" y2="19" stroke="#a277ff" stroke-width="1.5" marker-end="url(#arrow)"/>
-        <rect x="320" y="8" width="40" height="22" rx="4" fill="#24242a" stroke="#ffb347" stroke-width="1.5"/>
-        <text x="340" y="23" fill="#ffb347" font-size="9" text-anchor="middle" font-family="monospace">on</text>
-
-        <!-- Memory icon -->
-        <text x="400" y="23" fill="#9292a4" font-size="12" font-family="system-ui">📝 KV cache filled</text>
+        <rect x="100" y="8" width="30" height="20" rx="3" fill="#24242a" stroke="#4ecdc4" stroke-width="1.5"/>
+        <text x="115" y="22" fill="#e4e4ec" font-size="8" text-anchor="middle" font-family="monospace">The</text>
+        <rect x="132" y="8" width="30" height="20" rx="3" fill="#24242a" stroke="#4ecdc4" stroke-width="1.5"/>
+        <text x="147" y="22" fill="#e4e4ec" font-size="8" text-anchor="middle" font-family="monospace">cat</text>
+        <rect x="164" y="8" width="30" height="20" rx="3" fill="#24242a" stroke="#4ecdc4" stroke-width="1.5"/>
+        <text x="179" y="22" fill="#e4e4ec" font-size="8" text-anchor="middle" font-family="monospace">sat</text>
+        <line x1="194" y1="18" x2="202" y2="18" stroke="#a277ff" stroke-width="1" marker-end="url(#arr5)"/>
+        <rect x="206" y="8" width="50" height="20" rx="3" fill="#24242a" stroke="#ff6b9d" stroke-width="1.5"/>
+        <text x="231" y="22" fill="#ff6b9d" font-size="8" text-anchor="middle" font-family="system-ui">→ 32 layers →</text>
+        <line x1="256" y1="18" x2="264" y2="18" stroke="#a277ff" stroke-width="1" marker-end="url(#arr5)"/>
+        <rect x="268" y="8" width="30" height="20" rx="3" fill="#24242a" stroke="#ffb347" stroke-width="1.5"/>
+        <text x="283" y="22" fill="#ffb347" font-size="8" text-anchor="middle" font-family="monospace">on</text>
+        <text x="305" y="22" fill="#9292a4" font-size="9" font-family="system-ui">📝 cached</text>
 
         <!-- Decode phase -->
-        <text x="10" y="55" fill="#a277ff" font-size="10" font-family="system-ui" font-weight="700">Decode (sequential):</text>
-        <rect x="100" y="42" width="36" height="22" rx="4" fill="#2a2a35" stroke="#4ecdc4" stroke-width="1" opacity="0.5"/>
-        <text x="118" y="57" fill="#9292a4" font-size="8" text-anchor="middle" font-family="monospace">(4 tokens)</text>
-        <line x1="136" y1="53" x2="148" y2="53" stroke="#a277ff" stroke-width="1" marker-end="url(#arrow)"/>
-        <rect x="152" y="42" width="60" height="22" rx="4" fill="#24242a" stroke="#ff6b9d" stroke-width="1.5"/>
-        <text x="182" y="57" fill="#ff6b9d" font-size="9" text-anchor="middle" font-family="system-ui">→ Transformer →</text>
-        <line x1="212" y1="53" x2="224" y2="53" stroke="#a277ff" stroke-width="1.5" marker-end="url(#arrow)"/>
-        <rect x="228" y="42" width="36" height="22" rx="4" fill="#24242a" stroke="#ffb347" stroke-width="1.5"/>
-        <text x="246" y="57" fill="#ffb347" font-size="9" text-anchor="middle" font-family="monospace">the</text>
+        <text x="10" y="55" fill="#a277ff" font-size="10" font-family="system-ui" font-weight="700">Decode (one-by-one):</text>
+        <rect x="100" y="42" width="36" height="20" rx="3" fill="#2a2a35" stroke="#4ecdc4" stroke-width="1" opacity="0.5"/>
+        <text x="118" y="56" fill="#9292a4" font-size="7" text-anchor="middle" font-family="monospace">(4 cached)</text>
+        <line x1="136" y1="52" x2="144" y2="52" stroke="#a277ff" stroke-width="1" marker-end="url(#arr5)"/>
+        <rect x="148" y="42" width="50" height="20" rx="3" fill="#24242a" stroke="#ff6b9d" stroke-width="1.5"/>
+        <text x="173" y="56" fill="#ff6b9d" font-size="8" text-anchor="middle" font-family="system-ui">→ 32 layers →</text>
+        <line x1="198" y1="52" x2="206" y2="52" stroke="#a277ff" stroke-width="1" marker-end="url(#arr5)"/>
+        <rect x="210" y="42" width="28" height="20" rx="3" fill="#24242a" stroke="#ffb347" stroke-width="1.5"/>
+        <text x="224" y="56" fill="#ffb347" font-size="8" text-anchor="middle" font-family="monospace">the</text>
 
-        <!-- Arrow pointing to next decode -->
-        <line x1="264" y1="53" x2="290" y2="53" stroke="#9292a4" stroke-width="1" stroke-dasharray="3,2" marker-end="url(#arrow)"/>
-        <rect x="294" y="42" width="36" height="22" rx="4" fill="#24242a" stroke="#4ecdc4" stroke-width="1.5"/>
-        <text x="312" y="57" fill="#e4e4ec" font-size="9" text-anchor="middle" font-family="monospace">mat</text>
-        <line x1="330" y1="53" x2="356" y2="53" stroke="#9292a4" stroke-width="1" stroke-dasharray="3,2" marker-end="url(#arrow)"/>
-        <text x="370" y="57" fill="#9292a4" font-size="9" font-family="system-ui">...</text>
+        <line x1="238" y1="52" x2="256" y2="52" stroke="#9292a4" stroke-width="1" stroke-dasharray="3,2" marker-end="url(#arr5)"/>
+        <rect x="260" y="42" width="28" height="20" rx="3" fill="#24242a" stroke="#4ecdc4" stroke-width="1.5"/>
+        <text x="274" y="56" fill="#e4e4ec" font-size="8" text-anchor="middle" font-family="monospace">mat</text>
+        <line x1="288" y1="52" x2="306" y2="52" stroke="#9292a4" stroke-width="1" stroke-dasharray="3,2" marker-end="url(#arr5)"/>
+        <text x="316" y="56" fill="#9292a4" font-size="9" font-family="system-ui">📝 growing</text>
 
-        <!-- KV cache reuse -->
-        <text x="400" y="57" fill="#9292a4" font-size="12" font-family="system-ui">📝 KV cache grows</text>
+        <!-- Key insight text -->
+        <text x="200" y="85" fill="#a277ff" font-size="9" text-anchor="middle" font-family="system-ui">Each decode step: same compute cost as prefill,</text>
+        <text x="200" y="97" fill="#a277ff" font-size="9" text-anchor="middle" font-family="system-ui">even though only 1 new token is processed!</text>
       </svg>
     </div>
   </div>
 
-  <p>The <span class="key-term">prefill</span> phase processes all input tokens in parallel (one forward pass). The <span class="key-term">decode</span> phase generates tokens one at a time, each requiring a full forward pass. Decode is typically the bottleneck.</p>
-
+  <!-- ==================== KV CACHE ==================== -->
   <h2 id="kvcache">The KV Cache</h2>
-  <p>The key optimization for autoregressive decoding: we cache the Key (K) and Value (V) projections from each attention layer, so they don't need to be recomputed at each step:</p>
+
+  <h3>Why This Matters</h3>
+  <p>Here's the core insight: <strong>without the KV cache, every decode step would recompute attention against ALL previous tokens from scratch.</strong></p>
+
+  <p>Think about generating token #4096 in a conversation. Without caching:</p>
+  <ul class="content-list">
+    <li>You'd compute Q, K, V for all 4095 previous tokens <em>again</em></li>
+    <li>That's 4095 × (QKV computation) that you've already done before</li>
+    <li>Total complexity per step: <strong>O(L²)</strong> — quadratic in sequence length</li>
+  </ul>
+
+  <p>With the KV cache:</p>
+  <ul class="content-list">
+    <li>For each new token, you compute only <strong>Q, K, V for that one token</strong></li>
+    <li>Append the new K and V to the cache</li>
+    <li>Attention still considers all previous tokens (using cached values)</li>
+    <li>Total complexity per step: <strong>O(L)</strong> — linear in sequence length</li>
+  </ul>
+
+  <h3>Step-by-Step Example</h3>
+  <div class="math-block">
+    <div class="math-block-header">KV Cache Growth (Single Head, Simplified)</div>
+    <div class="math-block-body" style="font-family:monospace; font-size:13px;">
+  <strong>Step 1 (The):</strong>  compute K₁, V₁ → cache = [K₁, V₁]
+  <strong>Step 2 (cat):</strong> compute K₂, V₂ → cache = [K₁, V₁, K₂, V₂]
+             &nbsp;attention uses K=[K₁,K₂] and V=[V₁,V₂]
+  <strong>Step 3 (sat):</strong> compute K₃, V₃ → cache = [K₁, V₁, K₂, V₂, K₃, V₃]
+             &nbsp;attention uses K=[K₁,K₂,K₃] and V=[V₁,V₂,V₃]
+  ...
+  <strong>Step 4096:</strong> cache has 4096 K vectors and 4096 V vectors
+             &nbsp;attention uses all 4096 positions — O(L) work
+             &nbsp;(vs O(L²) without cache — 4096× more work!)<br><br>
+  <strong>Without KV cache:</strong> At step 4096, you'd recompute K₁...K₄₀₉₅ from scratch.<br>
+  <strong>With KV cache:</strong> You compute only K₄₀₉₆ and V₄₀₉₆. Everything else is in cache. 🎉
+    </div>
+  </div>
+
+  <div class="callout-tip">
+    <strong>The saving is enormous:</strong> For a 4096-token sequence, the KV cache reduces attention computation from 4096² = 16.8M operations per layer to just 4096 per step — a 4096× reduction at the last token!
+  </div>
+
+  <h3>Memory Cost</h3>
+  <p>The KV cache has a cost: memory. For each request, we need to store every layer's K and V projections:</p>
 
   <div class="math-block">
     <div class="math-block-header">KV Cache Memory per Request</div>
     <div class="math-block-body">
       Memory = 2 · n<sub>layers</sub> · n<sub>heads</sub> · d<sub>head</sub> · L · bytes<br><br>
       For a 7B model (n<sub>layers</sub>=32, n<sub>heads</sub>=32, d<sub>head</sub>=128) at FP16:<br>
-      Cache = 2 × 32 × 32 × 128 × 4096 × 2 bytes = 2 GB at 4K context<br>
-      = 16 GB at 32K context<br><br>
-      For a 70B model with 8K context: ~6 GB per request
+      Cache = 2 × 32 × 32 × 128 × 4096 × 2 bytes = <strong>2 GB at 4K context</strong><br>
+      = <strong>16 GB at 32K context</strong><br><br>
+      For a 70B model with 8K context: <strong>~6 GB per request</strong>
     </div>
   </div>
 
-  <p>At each decode step, we compute Q, K, V for just the <em>new token</em>, append K and V to the cache, then compute attention using the full cache. This avoids O(L²) recomputation per step, reducing it to O(L) per step.</p>
-
   <div class="callout-warn">
-    The KV cache is the dominant memory consumer at long contexts. For a 70B model serving 32 concurrent requests at 128K context, the KV cache alone requires 32 × 64 GB = 2 TB of memory — far more than the model weights.
+    <strong>The KV cache dominates at long contexts.</strong> For a 70B model serving 32 concurrent requests at 128K context, the KV cache alone requires 32 × 64 GB = 2 TB of memory — far more than the model weights (35 GB at 4-bit). This is why long-context serving is expensive: each request's KV cache grows linearly with output length.
   </div>
 
+  <!-- ==================== MEMORY BANDWIDTH WALL ==================== -->
   <h2 id="memory-wall">The Memory Bandwidth Wall</h2>
-  <p>LLM inference is fundamentally <span class="key-term">memory-bound</span>, not compute-bound. Each decode step reads the entire model parameters from GPU memory (HBM) into the compute units (SRAM), performs one matrix-vector multiply, and writes the KV cache:</p>
+
+  <h3>The Kitchen Analogy</h3>
+  <p>Think of a GPU like a <strong>restaurant kitchen</strong>:</p>
+  <ul class="content-list">
+    <li><strong>HBM (High Bandwidth Memory)</strong> is the pantry — it holds all ingredients (model weights), is large (80 GB on H100), but takes time to walk to.</li>
+    <li><strong>SRAM</strong> is the countertop workspace — it's small (only a few MB) but extremely fast to access.</li>
+    <li><strong>CUDA cores / Tensor Cores</strong> are the chefs — once ingredients are on the counter, they can cook incredibly fast.</li>
+  </ul>
+  <p>The bottleneck in LLM inference isn't how fast the chefs can cook — it's <strong>how fast ingredients can be carried from the pantry to the counter</strong>. This is the memory bandwidth wall.</p>
+
+  <p>Each decode step requires reading <em>all model weights</em> from HBM (pantry) into SRAM (counter) to perform one matrix-vector multiply, then writing the KV cache back:</p>
 
   <table class="styled-table">
-    <thead><tr><th>GPU</th><th>Memory Bandwidth</th><th>70B Read Time</th><th>Compute (1 token)</th></tr></thead>
+    <thead><tr><th>GPU</th><th>Memory Bandwidth</th><th>70B FP16 Read Time</th><th>Compute (1 token)</th></tr></thead>
     <tbody>
       <tr><td>H100 SXM</td><td>3,350 GB/s</td><td>~42 ms</td><td>~1 ms</td></tr>
       <tr><td>A100 SXM</td><td>2,040 GB/s</td><td>~69 ms</td><td>~2 ms</td></tr>
       <tr><td>A100 PCIe</td><td>1,555 GB/s</td><td>~90 ms</td><td>~2 ms</td></tr>
-      <tr><td>RTX 4090</td><td>1,008 GB/s</td><td>~79 ms (24 GB < 140 GB → requires quantization)</td><td>~3 ms (quantized)</td></tr>
+      <tr><td>RTX 4090</td><td>1,008 GB/s</td><td>~79 ms (24 GB &lt; 140 GB → needs quantization)</td><td>~3 ms (quantized)</td></tr>
     </tbody>
   </table>
 
-  <p>At FP16, a 70B model is ~140 GB. On an H100 (3.35 TB/s), reading all weights takes 140 GB / 3,350 GB/s ≈ 42 ms. This sets a <strong>hard lower bound</strong> on token generation speed — ~24 tokens/second — regardless of compute efficiency.</p>
+  <p>At FP16, a 70B model is ~140 GB. On an H100 (3.35 TB/s), reading all weights takes 140 GB / 3,350 GB/s ≈ 42 ms. This sets a <strong>hard lower bound</strong> on token generation speed — ~24 tokens/second — regardless of compute efficiency. The chefs are idle 97% of the time, waiting for ingredients!</p>
 
   <div class="callout-tip">
-    This is why quantization speeds up inference disproportionately: at 4-bit, the 70B model is 35 GB instead of 140 GB, reducing the read time from 42 ms to 10 ms — a 4× speedup on the exact same compute operations.
+    <strong>Why quantization speeds up inference disproportionately:</strong> At 4-bit, the 70B model is 35 GB instead of 140 GB, reducing the pantry-to-counter trip from 42 ms to 10 ms. Same chefs, same recipes — but 4× faster because the bottleneck is how fast you can carry ingredients, not how fast you can cook.
   </div>
 
+  <!-- ==================== BATCHING ==================== -->
   <h2 id="batching">Continuous Batching</h2>
-  <p>Naive batching (wait for all requests to finish before starting new ones) is inefficient for LLMs because generation lengths vary widely. <span class="key-term">Continuous batching</span> (used by vLLM, TGI) interleaves tokens from different requests at each step:</p>
 
+  <h3>The Problem with Naive Batching</h3>
+  <p>In traditional ML inference, you batch requests together and wait for all of them to finish before processing the next batch. This works for image classification (all requests take the same time) but fails for LLMs because <strong>generation lengths vary wildly</strong>.</p>
+  <p>Imagine a batch of 4 requests with lengths of 10, 50, 200, and 500 tokens. With naive batching, requests 1–3 sit idle for 490 extra steps waiting for request 4 to finish. That's 73% wasted GPU capacity.</p>
+
+  <h3>How Continuous Batching Works</h3>
+  <p><span class="key-term">Continuous batching</span> (used by vLLM, TGI) interleaves tokens from different requests at <em>every single step</em>:</p>
   <ol class="num-list">
-    <li>System receives requests A, B, C at different times</li>
-    <li>Each step: prefill new requests + decode ongoing requests in a single batch</li>
-    <li>Finished requests (e.g., short generation) exit the batch immediately</li>
-    <li>KV caches are paged (PagedAttention) — allocated in fixed-size blocks to avoid fragmentation and support sharing across requests with common prefixes</li>
+    <li><strong>Step 1:</strong> System receives requests A, B, C. All are in the prefill phase — processed together.</li>
+    <li><strong>Step 2:</strong> Request A finishes generating. It exits the batch immediately. New request D joins.</li>
+    <li><strong>Step 3:</strong> Request B finishes. Request E joins. Request A's output is streamed to the user.</li>
+    <li>Each step: a mix of prefilling (new requests) and decoding (ongoing requests).</li>
   </ol>
 
+  <p>Because each request is just one token per step, the batch isn't "blocked" by slow requests — every step uses the GPU for useful work.</p>
+
+  <h3>PagedAttention (vLLM)</h3>
   <div class="callout">
-    <strong>PagedAttention (vLLM):</strong> Inspired by virtual memory in operating systems. The KV cache is divided into fixed-size "pages." Logical pages can map to non-contiguous physical memory, eliminating fragmentation and enabling efficient sharing of common prefixes (e.g., system prompts, few-shot examples).
+    <strong>PagedAttention:</strong> Inspired by virtual memory in operating systems. The KV cache is divided into fixed-size "pages" (like memory pages in an OS). Logical pages can map to non-contiguous physical memory, eliminating fragmentation and enabling efficient sharing of common prefixes (e.g., system prompts, few-shot examples). <em>Result: near-100% memory utilization vs 60-70% with naive contiguous allocation.</em>
   </div>
 
+  <!-- ==================== SPECULATIVE DECODING ==================== -->
   <h2 id="speculative">Speculative Decoding</h2>
-  <p>A technique that generates multiple tokens per forward pass of the large model by using a small <span class="key-term">draft model</span>:</p>
 
-  <ol class="num-list">
-    <li>Draft model (e.g., 1B parameters) generates K candidate tokens autoregressively (fast — small model = less memory bandwidth)</li>
-    <li>Large model (e.g., 70B) validates all K tokens in a single forward pass using a modified attention mask</li>
-    <li>Tokens that match the large model's distribution are accepted; the rest are corrected and the process repeats</li>
-  </ol>
+  <p>A technique that generates <strong>multiple tokens per forward pass</strong> of the large model by using a small <span class="key-term">draft model</span> to "guess" what the large model would generate.</p>
 
-  <p>Typical acceptance rate: 70-90% with a well-aligned draft model → 2-3× throughput improvement at no loss of quality (since all outputs are validated by the large model).</p>
+  <h3>Concrete Example</h3>
+  <div class="math-block">
+    <div class="math-block-header">Speculative Decoding Walkthrough</div>
+    <div class="math-block-body" style="font-family:monospace; font-size:13px;">
+  <strong>Setup:</strong> Large model = 70B (slow, ~25 tok/s)<br>
+  &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Draft model = 1B (fast, ~500 tok/s)<br><br>
+  <strong>Step 1:</strong> Draft model generates 7 candidate tokens in sequence:<br>
+  &nbsp;&nbsp;&nbsp;&nbsp;→ ["The", "cat", "sat", "on", "the", "mat", "."]  (takes ~14 ms)<br><br>
+  <strong>Step 2:</strong> Large model checks ALL 7 tokens in <strong>one single forward pass</strong>:<br>
+  &nbsp;&nbsp;&nbsp;&nbsp;→ Evaluates each position: is this what I would have generated?<br>
+  &nbsp;&nbsp;&nbsp;&nbsp;→ Accepts ["The", "cat", "sat", "on", "the"] ✓<br>
+  &nbsp;&nbsp;&nbsp;&nbsp;→ Rejects "mat" — large model would have said "rug" instead<br><br>
+  <strong>Step 3:</strong> Keep the 5 accepted tokens. Reject "mat" and <strong>continue from "rug"</strong>:<br>
+  &nbsp;&nbsp;&nbsp;&nbsp;→ Output so far: "The cat sat on the rug"<br><br>
+  <strong>Result:</strong> Generated 6 tokens in ~40+14=54 ms ≈ 111 tok/s<br>
+  &nbsp;&nbsp;&nbsp;&nbsp;(vs ~25 tok/s for standard decoding — <strong>4.4× faster!</strong>)<br><br>
+  <strong>Worst case:</strong> All 7 tokens rejected → you wasted the draft model's time.<br>
+  &nbsp;&nbsp;&nbsp;&nbsp;But you're <em>no worse</em> than standard decoding (still one validation pass).<br>
+  <strong>Best case:</strong> All 7 accepted → 7 tokens for the price of 1 → 7× speedup!
+    </div>
+  </div>
 
+  <p>Typical acceptance rate: 70–90% with a well-aligned draft model → 2–3× throughput improvement at <strong>no loss of quality</strong> (since all outputs are validated by the large model before being emitted).</p>
+
+  <div class="callout-tip">
+    <strong>Key insight:</strong> Speculative decoding works because most token predictions are "easy" — the next word is often obvious from context. The draft model handles the easy cases cheaply, and the large model only needs to check them. The large model's expensive compute is reserved for verification and for the hard cases where the draft model guessed wrong.
+  </div>
+
+  <!-- ==================== VLLM IN PRACTICE ==================== -->
+  <h2 id="vllm-practice">vLLM in Practice: A Concrete Calculation</h2>
+  <p>Let's put everything together with a real-world capacity planning example:</p>
+
+  <div class="math-block">
+    <div class="math-block-header">Serving 32 Concurrent Requests on a 7B Model</div>
+    <div class="math-block-body">
+  <strong>Model:</strong> Llama 3 7B, INT4 quantized<br>
+  <strong>Concurrent requests:</strong> 32<br>
+  <strong>Context length:</strong> 4,096 tokens each<br><br>
+  <strong>Memory budget:</strong><br>
+  &nbsp;&nbsp;Model weights (INT4): 7B × 0.5 bytes = 3.5 GB<br>
+  &nbsp;&nbsp;KV cache (32 reqs × 4K context): 32 × 2 GB = <strong>64 GB</strong><br>
+  &nbsp;&nbsp;Activations + overhead: ~2.5 GB<br>
+  &nbsp;&nbsp;<strong>Total: ~70 GB</strong><br><br>
+  <strong>Result: Fits on 1 × A100-80GB.</strong><br><br>
+  <em>Notice: The KV cache (64 GB) dominates the memory budget — it's 18× larger than the model weights (3.5 GB)! This is typical for production deployments.</em>
+    </div>
+  </div>
+
+  <p>Now for a 70B model with the same setup:</p>
+  <div class="math-block">
+    <div class="math-block-header">Serving 32 Concurrent Requests on a 70B Model</div>
+    <div class="math-block-body">
+  <strong>Model:</strong> Llama 3 70B, INT4 quantized<br>
+  &nbsp;&nbsp;Model weights: 70B × 0.5 bytes = 35 GB<br>
+  &nbsp;&nbsp;KV cache (32 reqs × 4K context): 32 × 6 GB = <strong>192 GB</strong><br>
+  &nbsp;&nbsp;Activations + overhead: ~5 GB<br>
+  &nbsp;&nbsp;<strong>Total: ~232 GB</strong><br><br>
+  <strong>Result: Need 3–4 A100-80GB GPUs</strong> (model parallelism + KV cache sharding).<br><br>
+  <em>This is why large models are expensive to serve — the KV cache scales with both<br>concurrency AND context length.</em>
+    </div>
+  </div>
+
+  <!-- ==================== PRODUCTION STACK ==================== -->
   <h2 id="production">Production Serving Stack</h2>
-  <p>A production LLM inference system typically combines:</p>
+  <p>A production LLM inference system typically combines multiple specialized components:</p>
   <table class="styled-table">
     <thead><tr><th>Component</th><th>Purpose</th><th>Popular Implementation</th></tr></thead>
     <tbody>
@@ -174,6 +332,16 @@
       <tr><td>GPU orchestration</td><td>Tensor/pipeline parallelism across GPUs</td><td>NCCL, Megatron, Ray</td></tr>
     </tbody>
   </table>
+
+  <h2 id="summary">Summary</h2>
+  <ul class="content-list">
+    <li><strong>Autoregressive generation</strong> processes one token at a time. Each decode step is a full forward pass through all layers, making inference memory-bandwidth bound.</li>
+    <li><strong>KV cache</strong> avoids recomputing attention projections for previous tokens, reducing complexity from O(L²) to O(L) per step — essential for long sequences.</li>
+    <li><strong>Memory bandwidth wall</strong> is the fundamental bottleneck: reading model weights from GPU memory dominates inference time, not computation. Quantization directly alleviates this.</li>
+    <li><strong>Continuous batching</strong> interleaves requests at each token step, eliminating GPU idle time from variable-length generations.</li>
+    <li><strong>Speculative decoding</strong> uses a small draft model to generate multiple candidates, verified in one pass by the large model — achieving 2–3× throughput without quality loss.</li>
+    <li><strong>KV cache dominates deployment costs</strong>: for 32 concurrent requests at 4K context, the cache is 18× larger than the model weights. This is the primary scaling consideration for production systems.</li>
+  </ul>
 
   <div class="completion-box">
     <span class="check-icon">✓</span>

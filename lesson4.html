@@ -38,8 +38,11 @@
     <p class="lesson-subtitle">How to shrink models 4× without destroying quality</p>
   </header>
 
+  <!-- ==================== A RELATABLE START ==================== -->
   <div class="story-hook">
-    A 70B-parameter model at FP32 precision requires 280 GB of GPU memory — more than a single H100 (80 GB) can hold. Yet you can run a 70B model on a single GPU if you quantize it to 4-bit (35 GB). How does dropping 75% of the precision not destroy the model? The answer lies in understanding what model weights actually encode, and how quantization exploits the structure of neural network parameters.
+    <p><strong>Think of your phone photos.</strong> A 12 MP photo takes 3–4 MB as JPEG. But the raw sensor data from the same photo is 24–36 MB. How can JPEG throw away 85% of the data and still look nearly identical?</p>
+    <p>Because JPEG discards information the human eye can't perceive — subtle color variations, high-frequency noise, tiny brightness differences. The photo <em>looks</em> the same because what matters (edges, shapes, contrast) is preserved, while what doesn't matter (imperceptible noise) is dropped.</p>
+    <p><strong>Quantization is the same idea for neural networks.</strong> Model weights have redundancy. We can discard precision the model doesn't need. A 70B-parameter model at FP32 precision requires 280 GB of GPU memory — more than a single H100 (80 GB) can hold. Yet you can run that same 70B model on a single GPU if you quantize it to 4-bit (35 GB, an 8× reduction). How does dropping most of the precision not destroy the model? That's what this lesson is about.</p>
   </div>
 
   <div class="tldr">
@@ -47,27 +50,63 @@
     <p>Quantization reduces the precision of model weights and/or activations, typically from 16-bit floating point to 8-bit integers or 4-bit normalized floats. Memory drops linearly with bits (4× for FP16 → 4-bit). Quality degradation depends on the method: round-to-nearest works for INT8; GPTQ, AWQ, and NF4 formats are needed for 4-bit. Weights in large models are surprisingly robust to precision loss because they have high redundancy.</p>
   </div>
 
+  <!-- ==================== WHY QUANT WORKS ==================== -->
   <h2 id="why-quant">Why Quantization Works</h2>
+
   <p>Neural network weights have two key properties that make quantization feasible:</p>
   <ul class="content-list">
-    <li><strong>Overparameterization</strong> — models have far more parameters than needed; small perturbations to individual weights don't change the output much</li>
-    <li><strong>Weight distribution</strong> — most weights are small/near-zero; only a few outliers carry most of the signal</li>
+    <li><strong>Overparameterization</strong> — modern LLMs have far more parameters than needed to solve their training task. Small perturbations to individual weights don't change the output much because other weights can compensate. Think of it like a crowd carrying a heavy couch — one person shifting their grip barely changes the couch's path.</li>
+    <li><strong>Weight distribution</strong> — most weights are small/near-zero; only a few outliers carry most of the signal. Quantization preserves the important outliers naturally if we design the format carefully (more on this with NF4 below).</li>
   </ul>
   <p>The loss landscape near a trained minimum is surprisingly flat in many directions — you can move individual weights quite far before model quality measurably degrades.</p>
 
+  <h3>A Concrete Numerical Example</h3>
+  <p>Let's see quantization in action with real numbers. Consider a small weight matrix from one layer of a trained model:</p>
+
+  <div class="math-block">
+    <div class="math-block-header">Original FP32 Weights (excerpt)</div>
+    <div class="math-block-body" style="font-family:monospace; font-size:14px;">
+[ 0.23, -0.17,  1.42, -0.05,  0.88, -0.42,  0.01, -0.72,  0.56, -0.09 ]
+    </div>
+  </div>
+
+  <p>To quantize these to INT8 (range -128 to 127), we first compute the <strong>scale factor</strong>:</p>
+  <div class="formula">s = max(|weights|) / 127 = 1.42 / 127 ≈ 0.0112</div>
+
+  <p>Now each weight w becomes: <span class="formula">q = clamp(round(w / s), -128, 127)</span>:</p>
+
+  <div class="math-block">
+    <div class="math-block-header">Quantization Step-by-Step</div>
+    <div class="math-block-body" style="font-family:monospace; font-size:13px;">
+  w = 0.23 →  0.23 / 0.0112 =  20.5 → round →  21 → dequantize →  21 × 0.0112 =  0.235  (error: +0.005)
+  w = -0.17 → -0.17 / 0.0112 = -15.2 → round → -15 → dequantize → -15 × 0.0112 = -0.168  (error: +0.002)
+  w =  1.42 →  1.42 / 0.0112 = 126.8 → round → 127 → dequantize → 127 × 0.0112 =  1.422  (error: +0.002)
+  w = -0.05 → -0.05 / 0.0112 =  -4.5 → round →  -5 → dequantize →  -5 × 0.0112 = -0.056  (error: -0.006)
+  w =  0.88 →  0.88 / 0.0112 =  78.6 → round →  79 → dequantize →  79 × 0.0112 =  0.885  (error: +0.005)
+    </div>
+  </div>
+
+  <p>The <strong>errors are tiny</strong> — on the order of 0.001 to 0.006. For a model with billions of weights, these small perturbations almost always cancel out at the output, because later layers can compensate. The model's loss might change by <em>less than 0.001%</em> at INT8. At 4-bit, the errors are larger (fewer buckets), which is why we need smarter methods.</p>
+
+  <!-- ==================== PRECISION FORMATS ==================== -->
   <h2 id="precision">Precision Formats</h2>
 
   <table class="styled-table">
-    <thead><tr><th>Format</th><th>Bits</th><th>Memory per 7B</th><th>Typical Use</th></tr></thead>
+    <thead><tr><th>Format</th><th>Bits</th><th>Memory per 7B</th><th>Memory per 70B</th><th>Typical Use</th></tr></thead>
     <tbody>
-      <tr><td>FP32 (float32)</td><td>32</td><td>28 GB</td><td>Training, reference baseline</td></tr>
-      <tr><td>FP16 / BF16</td><td>16</td><td>14 GB</td><td>Training, inference</td></tr>
-      <tr><td>INT8</td><td>8</td><td>7 GB</td><td>Inference (minimal quality loss)</td></tr>
-      <tr><td>INT4 / NF4</td><td>4</td><td>3.5 GB</td><td>Inference (slight quality loss)</td></tr>
-      <tr><td>FP8 (E4M3, E5M2)</td><td>8</td><td>7 GB</td><td>FP8 training (H100 GPUs)</td></tr>
+      <tr><td>FP32 (float32)</td><td>32</td><td>28 GB</td><td>280 GB</td><td>Training, reference baseline</td></tr>
+      <tr><td>FP16 / BF16</td><td>16</td><td>14 GB</td><td>140 GB</td><td>Training, inference</td></tr>
+      <tr><td>INT8</td><td>8</td><td>7 GB</td><td>70 GB</td><td>Inference (minimal quality loss)</td></tr>
+      <tr><td>INT4 / NF4</td><td>4</td><td>3.5 GB</td><td>35 GB</td><td>Inference (slight quality loss)</td></tr>
+      <tr><td>FP8 (E4M3, E5M2)</td><td>8</td><td>7 GB</td><td>70 GB</td><td>FP8 training (H100 GPUs)</td></tr>
     </tbody>
   </table>
 
+  <div class="callout-tip">
+    <strong>Real-world impact:</strong> A 70B model at FP16 needs 140 GB — that's <em>two</em> H100 GPUs (80 GB each) just to hold the weights. At 4-bit (35 GB), it fits on a single GPU, freeing the second GPU for other work. This halves your serving cost.
+  </div>
+
+  <!-- ==================== TRADE-OFF WIDGET ==================== -->
   <h2 id="comparison">Size vs Quality Trade-off</h2>
 
   <div class="widget">
@@ -84,32 +123,69 @@
         </label>
       </div>
       <canvas id="quant-canvas" data-chart="quant" data-param="BF16" width="380" height="200" style="max-width:380px;margin:0.5rem auto;"></canvas>
-      <p class="widget-desc">NF4 maintains ~95% of FP32 quality at 12.5% the model size. INT4 drops to ~93%. Quality measurements vary by task — reasoning benchmarks degrade faster than simple QA.</p>
+      <p class="widget-desc">NF4 maintains ~95% of FP32 quality at 12.5% the model size. INT4 drops to ~93%. Quality measurements vary by task — reasoning benchmarks degrade faster than simple QA. In practice, most users can't tell the difference between FP16 and INT4 for chat applications.</p>
     </div>
   </div>
 
+  <!-- ==================== BEFORE/AFTER ==================== -->
+  <h3>Concrete Before / After: Inference Speed</h3>
+  <p>Quantization doesn't just save memory — it <strong>directly speeds up</strong> inference. Here's why:</p>
+
+  <div class="math-block">
+    <div class="math-block-header">70B Model — Speed Comparison on H100</div>
+    <div class="math-block-body">
+      <strong>FP16:</strong>  140 GB / 3,350 GB/s ≈ 42 ms per token → <strong>~24 tok/s</strong><br>
+      <strong>4-bit:</strong>  35 GB / 3,350 GB/s ≈ 10 ms per token  → <strong>~95 tok/s</strong><br><br>
+      <strong>Result: 4× faster on the exact same GPU.</strong><br>
+      <em>Because inference is memory-bandwidth bound (you spend most of the time reading weights from GPU memory, not computing with them), smaller weights = proportionally faster generation.</em>
+    </div>
+  </div>
+
+  <!-- ==================== PTQ ==================== -->
   <h2 id="ptq">Post-Training Quantization (PTQ)</h2>
-  <p>The most practical approach: take a pretrained model and quantize its weights without any retraining.</p>
+  <p>The most practical approach: take a pretrained model and quantize its weights <strong>without any retraining</strong>. This is how services like llama.cpp, Ollama, and most open-source LLM hosting work — they download a pretrained model and quantize it in minutes.</p>
 
   <h3>Round-to-Nearest (RTN)</h3>
   <p>The simplest method. For each weight w, find the closest representable value q in the target format:</p>
   <div class="formula">q = clamp(round(w / s), Q<sub>min</sub>, Q<sub>max</sub>) · s</div>
   <p>Where s = scale factor (max(|w|) / Q<sub>max</sub>) and Q<sub>min</sub>, Q<sub>max</sub> bound the target integer range.</p>
-  <p>Works well for INT8 (negligible quality loss) but degrades significantly at 4-bit because many weights map to the same quantized value, losing distinguishing information.</p>
+  <p>Works well for INT8 (negligible quality loss — see our numerical example above) but degrades significantly at 4-bit because only 16 distinct values are available. Many weights that were slightly different in FP16 map to <em>the same</em> integer value, losing the distinctions the model relies on. Imagine trying to describe 100 different shades of blue using only 5 words — you lose nuance.</p>
 
   <h3>GPTQ (Generative Pre-Trained Transformer Quantization)</h3>
-  <p>Obtains significantly better 4-bit results by solving an optimization problem. Instead of rounding each weight independently, GPTQ adjusts <em>remaining</em> weights to compensate for the error introduced by quantizing earlier weights:</p>
-  <ol class="num-list">
-    <li>Select a weight column to quantize</li>
-    <li>Quantize it via rounding</li>
-    <li>Compute the reconstruction error</li>
-    <li>Update the remaining (unquantized) weights in that row to cancel the error</li>
-    <li>Move to the next column</li>
-  </ol>
-  <p>Uses a small calibration dataset (~128 sequences) to compute optimal compensation. State-of-the-art for 4-bit quantization.</p>
+  <p>GPTQ obtains significantly better 4-bit results by solving an optimization problem. Instead of rounding each weight independently, GPTQ adjusts <em>remaining</em> (unquantized) weights to compensate for the error introduced by quantizing earlier weights.</p>
+
+  <h4>Concrete Example</h4>
+  <p>Imagine you're quantizing a row of four weights from left to right, using INT4 (16 levels):</p>
+  <div class="math-block">
+    <div class="math-block-header">GPTQ Step-by-Step</div>
+    <div class="math-block-body" style="font-family:monospace; font-size:13px;">
+  Original row:  w₁=1.42  w₂=-0.63  w₃=0.27  w₄=-0.91<br><br>
+  <strong>Step 1:</strong> Quantize w₁=1.42 → INT4 gives q₁=1.35 (error: -0.07)<br>
+  <strong>Step 2:</strong> Adjust w₂ to "hide" some of w₁'s error:<br>
+         &nbsp;&nbsp;w₂_new = -0.63 + (error_compensation) = -0.66<br>
+         &nbsp;&nbsp;This way, when the matrix multiplies, the output is closer to the original.<br>
+  <strong>Step 3:</strong> Quantize w₂_new=-0.66 → q₂=-0.62 (error: +0.04)<br>
+  <strong>Step 4:</strong> Adjust w₃ to compensate for both w₁ and w₂ errors...<br>
+  <strong>Step 5:</strong> Continue until all weights are quantized.<br><br>
+  <strong>Key insight:</strong> Instead of each weight bearing its own quantization error alone,<br>
+  the errors are distributed across multiple weights, effectively "hiding" them.
+    </div>
+  </div>
+
+  <p>GPTQ uses a small calibration dataset (~128 sequences) to compute the optimal compensation values. It's the current state-of-the-art for 4-bit quantization and is used in libraries like AutoGPTQ.</p>
 
   <h3>AWQ (Activation-Aware Weight Quantization)</h3>
-  <p>Recognizes that not all weight channels are equally important. Weights corresponding to activations with large magnitudes contribute more to output quality and should be quantized with higher precision:</p>
+  <p>AWQ recognizes a crucial fact: <strong>not all weight channels are equally important</strong>. Weights corresponding to activations with large magnitudes contribute more to output quality.</p>
+
+  <h4>The Recipe Analogy</h4>
+  <p>Think of weights as ingredients in a recipe:</p>
+  <ul class="content-list">
+    <li><strong>Salt, pepper, herbs</strong> (small-magnitude weights) — you can approximate. "A pinch" vs "0.8 grams" — the dish turns out fine either way.</li>
+    <li><strong>Baking soda</strong> (large-magnitude / outlier weights) — this needs precision. "Exactly 5 grams" vs "about 5 grams" determines whether your cake rises or flops.</li>
+    <li><strong>AWQ identifies the "exact measurement" weights</strong> — the channels where precision matters most — and protects them during quantization.</li>
+  </ul>
+
+  <p>AWQ's approach:</p>
   <ol class="num-list">
     <li>Compute activation statistics from calibration data</li>
     <li>Identify "salient" channels (activations with high magnitude)</li>
@@ -118,16 +194,26 @@
   </ol>
   <p>AWQ achieves similar quality to GPTQ but is faster to compute and has better hardware utilization during inference.</p>
 
+  <!-- ==================== 4-BIT FORMATS ==================== -->
   <h2 id="formats">4-bit Data Formats</h2>
 
-  <p>Standard INT4 has 16 evenly spaced values: {−8, −7, ..., 7}. But neural network weights follow a roughly normal distribution (centered at 0, bell-shaped). <span class="key-term">NF4 (Normal Float 4)</span> uses a non-uniform distribution that allocates more quantization levels near zero, where most weights live:</p>
+  <p>Standard INT4 has 16 evenly spaced values: {−8, −7, −6, −5, −4, −3, −2, −1, 0, 1, 2, 3, 4, 5, 6, 7}. Equally spaced, like the rungs of a ladder.</p>
+
+  <p>But neural network weights follow a roughly normal distribution — centered at 0 with a bell shape. Most weights are small (near zero), and only a few are large (the "outlier" features).</p>
+
+  <p><span class="key-term">NF4 (Normal Float 4)</span> uses a non-uniform distribution that allocates more quantization levels near zero, where most weights live, and fewer at the extremes. Think of it as a zoom lens — it gives you higher resolution where the "action" is:</p>
 
   <div class="diagram">
     <div class="diagram-header">INT4 vs NF4 Quantization Levels</div>
     <div class="diagram-body">
-      <svg viewBox="0 0 440 100" style="max-width:440px;">
+      <svg viewBox="0 0 440 100" style="width:100%;max-width:420px;height:auto;">
+        <defs>
+          <marker id="arrow-w" viewBox="0 0 10 10" refX="5" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+            <path d="M0,0 L10,5 L0,10" fill="#9292a4"/>
+          </marker>
+        </defs>
         <!-- INT4 levels (evenly spaced) -->
-        <text x="10" y="18" fill="#9292a4" font-size="10" font-family="system-ui">INT4:</text>
+        <text x="10" y="18" fill="#9292a4" font-size="11" font-family="system-ui">INT4:</text>
         <rect x="50" y="4" width="370" height="12" rx="2" fill="#2a2a35"/>
         <g fill="#ff6b9d">
           <rect x="52" y="2" width="4" height="16" rx="1"/>
@@ -150,7 +236,7 @@
         <text x="220" y="34" fill="#9292a4" font-size="9" text-anchor="middle" font-family="system-ui">Equal spacing → wastes precision near zero</text>
 
         <!-- NF4 levels (denser near center) -->
-        <text x="10" y="58" fill="#9292a4" font-size="10" font-family="system-ui">NF4:</text>
+        <text x="10" y="58" fill="#9292a4" font-size="11" font-family="system-ui">NF4:</text>
         <rect x="50" y="44" width="370" height="12" rx="2" fill="#2a2a35"/>
         <g fill="#4ecdc4">
           <rect x="52" y="42" width="4" height="16" rx="1"/>
@@ -170,7 +256,7 @@
           <rect x="376" y="42" width="4" height="16" rx="1"/>
           <rect x="388" y="42" width="4" height="16" rx="1"/>
         </g>
-        <text x="220" y="75" fill="#9292a4" font-size="9" text-anchor="middle" font-family="system-ui">More levels near zero → preserves small weights</text>
+        <text x="220" y="75" fill="#9292a4" font-size="9" text-anchor="middle" font-family="system-ui">More levels near zero → preserves small weights better</text>
 
         <!-- Gaussian bell curve -->
         <path d="M80,90 Q140,55 220,40 Q300,55 360,90" fill="none" stroke="#a277ff" stroke-width="1.5" opacity="0.5"/>
@@ -179,23 +265,58 @@
     </div>
   </div>
 
+  <h3>Concrete Example: INT4 vs NF4</h3>
+  <p>Let's see how these formats handle real model weights differently:</p>
+  <div class="math-block">
+    <div class="math-block-header">INT4 vs NF4 — Weight Quantization Examples</div>
+    <div class="math-block-body" style="font-family:monospace; font-size:13px;">
+  <strong>Weight = 0.001</strong>  (tiny value, very common — many weights are this small)<br>
+    INT4 range: {-8,-7,...,0,...,7} scaled to [-1.0, 1.0]<br>
+    → rounds to 0 (complete loss of information!)<br>
+    NF4: has a quantization level at approximately 0.001<br>
+    → preserves as ≈ 0.001 ✓<br><br>
+  <strong>Weight = 0.5</strong>  (moderate value)<br>
+    INT4: rounds to ≈ 0.50 ✓<br>
+    NF4: rounds to ≈ 0.49 ✓<br>
+    → both represent this well<br><br>
+  <strong>Weight = -0.88</strong>  (large negative outlier)<br>
+    INT4: rounds to ≈ -0.87 ✓<br>
+    NF4: rounds to ≈ -0.91 (slightly larger error)<br>
+    → INT4 is actually better here—NF4 sacrifices extreme-range precision
+    </div>
+  </div>
+
+  <p>NF4's advantage is clear: for the vast majority of weights (small near-zero values), it preserves information that INT4 completely loses. NF4 recovers about 2 percentage points of quality over INT4 at the same 4-bit budget.</p>
+
+  <!-- ==================== QAT ==================== -->
   <h2 id="qat">Quantization-Aware Training (QAT)</h2>
   <p>For the best quality at very low precision (2–3 bits), train with simulated quantization in the forward pass:</p>
   <ol class="num-list">
     <li>Insert fake quantization nodes after each weight in the computation graph</li>
     <li>Forward pass uses quantized weights and activations</li>
-    <li>Backward pass uses straight-through estimator (STE) — gradient flows through the quantization operation as if it were the identity</li>
-    <li>After training, replace with real quantization</li>
+    <li>Backward pass uses straight-through estimator (STE) — gradient flows through the quantization operation as if it were the identity function (the quantization step is non-differentiable, so we approximate it)</li>
+    <li>After training, replace fake quantization with real quantization — no further changes needed</li>
   </ol>
-  <p>QAT is expensive (requires training from scratch or continued pretraining) but can recover most quality lost at 4-bit and below.</p>
+  <p>QAT is expensive (requires training from scratch or continued pretraining) but can recover most quality lost at 4-bit and below. It's used by companies that ship quantized versions of their proprietary models.</p>
 
+  <h3>When to Use Which Method?</h3>
+  <p>Here's a practical decision guide:</p>
+  <ul class="content-list">
+    <li><strong>INT8:</strong> Just use RTN. It's fast, simple, and quality loss is negligible. Every model supports it.</li>
+    <li><strong>INT4 (chat):</strong> Use NF4, GPTQ, or AWQ. Quality difference is small for chat/tasks. Most users can't tell the difference from FP16.</li>
+    <li><strong>INT4 (reasoning/math):</strong> Use AWQ or GPTQ. Reasoning tasks are more sensitive to precision loss. Test your specific use case.</li>
+    <li><strong>2–3 bit:</strong> Only use QAT. Without training-aware quantization, quality loss at this level is unacceptable.</li>
+  </ul>
+
+  <!-- ==================== SUMMARY ==================== -->
   <h2 id="summary">Summary</h2>
   <ul class="content-list">
-    <li><strong>Quantoization</strong> reduces memory proportionally to bits, with INT8 → 50%, INT4 → 25% of FP16 size</li>
-    <li><strong>INT8 RTN</strong> works for most models with negligible quality loss</li>
-    <li><strong>4-bit</strong> requires sophisticated methods: GPTQ (optimal compensation) or AWQ (activation-aware scaling)</li>
-    <li><strong>NF4</strong> (normal float) gives better 4-bit quality than INT4 by matching weight distribution</li>
-    <li><strong>QAT</strong> (quantization-aware training) recovers additional quality but requires retraining</li>
+    <li><strong>Quantization</strong> reduces memory proportionally to bits: INT8 → 50%, INT4 → 25% of FP16 size</li>
+    <li><strong>INT8 RTN</strong> works for most models with negligible quality loss — just round and go</li>
+    <li><strong>4-bit</strong> requires sophisticated methods: GPTQ (optimal compensation across weights) or AWQ (activation-aware scaling that protects important channels)</li>
+    <li><strong>NF4</strong> (normal float) gives better 4-bit quality than INT4 by matching the bell-shaped weight distribution, with more precision near zero</li>
+    <li><strong>QAT</strong> (quantization-aware training) recovers additional quality but requires retraining — worth it for extreme compression (2–3 bit)</li>
+    <li><strong>Real-world impact:</strong> Quantizing a 70B model from FP16 to 4-bit reduces memory from 140 GB to 35 GB and accelerates inference from ~24 tok/s to ~95 tok/s on an H100 — a 4× win in both memory and speed</li>
   </ul>
 
   <div class="completion-box">

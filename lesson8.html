@@ -62,6 +62,10 @@
     </div>
   </div>
 
+  <div class="callout">
+    <strong>Think of a company with 8 specialists:</strong> one for math, one for writing, one for coding, etc. When a new project comes in (a token), the router sends it to the 2 most relevant specialists. '2+2' goes to math specialist. 'Write a poem' goes to writing specialist. Each specialist trains on their specific area, becoming deeply skilled.
+  </div>
+
   <p><strong>Key benefits:</strong></p>
   <div class="info-grid">
     <div class="info-item"><strong>Parameter count</strong>Total parameters can be 4-10× larger than a dense model at the same compute cost</div>
@@ -70,10 +74,14 @@
     <div class="info-item"><strong>Memory</strong>All experts must be in memory despite sparse activation (key limitation)</div>
   </div>
 
+  <div class="callout">
+    <strong>Concrete routing example:</strong> Token 'cosine' → router scores: expert 3 (math): 0.7, expert 5 (vocabulary): 0.2, expert 1 (syntax): 0.1, expert 2 (entities): 0.0 → token processed by experts 3 and 5. The other 6 experts do nothing for this token.
+  </div>
+
   <div class="widget">
     <div class="widget-header">📊 Model Size Comparison: Dense vs MoE</div>
     <div class="widget-body">
-      <canvas id="modelsize-canvas" data-chart="modelsize" width="500" height="180" style="max-width:500px;"></canvas>
+      <canvas id="modelsize-canvas" data-chart="modelsize" width="500" height="180" style="width:100%;max-width:420px;"></canvas>
       <p class="widget-desc">MoE models have far more total parameters but similar active (compute) cost to smaller dense models. GPT-4 is estimated to use an 8-expert MoE with ~1.8T total parameters but only ~350B activated per token.</p>
     </div>
   </div>
@@ -102,6 +110,10 @@
     </tbody>
   </table>
 
+  <div class="callout">
+    <strong>Why can KV heads be shared without much quality loss?</strong> Because the keys and values encode 'what information is available at each position.' Multiple query heads asking different questions about the SAME content can share the same source material. Only the queries need to be different.
+  </div>
+
   <p><span class="key-term">GQA with 8 KV heads</span> reduces KV cache to 25% of MHA while maintaining nearly identical quality. It's the standard in post-2023 models. Each group of Q heads (e.g., 4 Q heads per KV head) shares the same K and V.</p>
 
   <h2 id="flashattn">FlashAttention</h2>
@@ -113,6 +125,10 @@
     <li>Apply softmax and multiply by V while still in SRAM</li>
     <li>Accumulate results and write back to HBM</li>
   </ol>
+
+  <div class="callout">
+    <strong>Concrete analogy:</strong> Standard attention writes the full n×n matrix to main memory (HBM), then reads it back. It's like taking all your groceries out of the fridge, putting them on the kitchen table, then moving them to the counter one by one. FlashAttention keeps everything on the counter (SRAM) — you process each item without moving it to the table first.
+  </div>
 
   <div class="callout">
     <strong>Speedup:</strong> FlashAttention is 2-4× faster than standard attention for long sequences. More importantly, it's IO-aware — performance is bounded by SRAM→HBM bandwidth, not FLOPs. This makes long-context models practical (FlashAttention-2 achieves ~50% of theoretical HBM bandwidth utilization on H100).
@@ -129,6 +145,10 @@
       Where Ā, B̄ are discretized parameters that depend on the input x<sub>t</sub><br>
       (this is the "selective" part — the state transition changes per token)
     </div>
+  </div>
+
+  <div class="callout">
+    <strong>Mamba intuition:</strong> Mamba processes tokens sequentially, maintaining a 'summary state' as it goes. It's like reading a book and keeping a running summary in your head. After each sentence, you update your understanding. You never compare pairs of sentences directly — you just update your mental state. This makes it O(L) instead of O(L²), but you lose the ability to directly compare distant tokens.
   </div>
 
   <p><strong>Key advantage:</strong> inference is O(L) (linear in sequence length) instead of O(L²). For long sequences (1M+ tokens), this is transformative. Mamba-3B matches Transformer-3B on language modeling benchmarks while being faster at inference.</p>
@@ -149,7 +169,11 @@
   <h2 id="summary">What's Next?</h2>
   <p>The transformer architecture that defined the 2020s is undergoing rapid evolution. State space models challenge its dominance for long-context tasks. MoE enables trillion-parameter models without proportional compute. Hardware-aware algorithms (FlashAttention, kernel fusion) squeeze every bit of GPU utilization.</p>
 
-  <p>The next generation of LLMs will likely combine all of these: <strong>MoE × GQA × FlashAttention × SSM hybrids × multi-token prediction</strong>, all trained with massive-scale data pipelines and alignment techniques that go far beyond simple RLHF.</p>
+  <p>The next generation of LLMs will likely combine all of these: <strong>MoE × GQA × FlashAttention × SSM hybrids × multi-token prediction</strong>, all trained with massive-scale data pipelines and alignment techniques that go far beyond simple RLHF.
+
+  <div class="callout">
+    <strong>Speculative outlook:</strong> The frontier now includes test-time compute scaling (letting models 'think' longer), agentic LLMs that can use tools and act autonomously, and reasoning models that excel at multi-step problem solving through reinforcement learning on verifiable outcomes.
+  </div>
 
   <div class="completion-box">
     <span class="check-icon">✓</span>

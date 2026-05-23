@@ -3,14 +3,14 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>LLM Deep Dive: A Rigorous Foundation</title>
+<title>LLM Deep Dive: From First Principles</title>
 <link rel="stylesheet" href="assets/style.css">
 </head>
 <body>
 
 <nav class="top-nav">
   <a href="index.html" class="nav-brand"><span class="emoji">🧠</span> LLM Deep Dive</a>
-  <span class="nav-lesson">A Rigorous Foundation</span>
+  <span class="nav-lesson">From First Principles</span>
   <button class="menu-btn" aria-label="Lessons">☰</button>
 </nav>
 
@@ -34,8 +34,9 @@
 <main class="container">
   <header class="lesson-header">
     <div class="lesson-meta">8-Lesson Course</div>
-    <h1>LLM Deep Dive:<br><span class="sub">A Rigorous Foundation</span></h1>
+    <h1>LLM Deep Dive:<br><span class="sub">From First Principles</span></h1>
     <p class="lesson-subtitle">From tokenization to modern architecture variants — the algorithms, math, and data behind large language models</p>
+    <p class="course-description">This course is for engineers who want to look under the hood and understand how LLMs actually work. We’ll move beyond treating models as black boxes and examine the exact mechanisms — from how text gets turned into numbers to the linear algebra inside attention layers — that make these systems possible.</p>
   </header>
 
   <div class="story-hook">
@@ -44,7 +45,7 @@
 
   <div class="tldr">
     <div class="tldr-label">TL;DR</div>
-    <p>8 lessons covering the core technical foundations of modern LLMs: <strong>Lesson 1</strong> — how tokenization and embeddings turn text into vectors; <strong>Lesson 2</strong> — the full transformer architecture with attention math; <strong>Lesson 3</strong> — pretraining objectives, data pipelines, and loss dynamics; <strong>Lesson 4</strong> — quantization techniques (INT8, NF4, GPTQ) and model compression; <strong>Lesson 5</strong> — inference optimization (KV cache, speculative decoding, batching); <strong>Lesson 6</strong> — scaling laws with empirical data; <strong>Lesson 7</strong> — RLHF, DPO, and instruction tuning; <strong>Lesson 8</strong> — modern innovations (MoE, Mamba, GQA, RoPE, FlashAttention).</p>
+    <p>8 lessons covering the core technical foundations of modern LLMs: <strong>Lesson 1</strong> — how tokenization and embeddings turn text into vectors; <strong>Lesson 2</strong> — the full transformer architecture with attention math; <strong>Lesson 3</strong> — pretraining objectives, data pipelines, and loss dynamics; <strong>Lesson 4</span> — quantization techniques (INT8, NF4, GPTQ) and model compression; <strong>Lesson 5</strong> — inference optimization (KV cache, speculative decoding, batching); <strong>Lesson 6</strong> — scaling laws with empirical data; <strong>Lesson 7</strong> — RLHF, DPO, and instruction tuning; <strong>Lesson 8</strong> — modern innovations (MoE, Mamba, GQA, RoPE, FlashAttention).</p>
   </div>
 
   <h2>Syllabus</h2>
@@ -52,56 +53,56 @@
   <div class="section-card">
     <div class="section-card-header"><h3 style="margin:0;font-size:1.05rem;color:var(--accent)">Lesson 1: Tokenization &amp; Embeddings</h3></div>
     <div class="section-card-body">
-      <p>How raw text becomes numerical representations. Byte-Pair Encoding, WordPiece, SentencePiece tokenizers. Learned embeddings, positional encodings (sinusoidal, RoPE, ALiBi). Subword ambiguity and tokenization artifacts.</p>
+      <p>How raw text becomes numerical representations. We'll explore Byte-Pair Encoding, WordPiece, SentencePiece tokenizers, learned embeddings, and positional encodings (sinusoidal, RoPE, ALiBi). Plus, we'll see why tokenization choices matter with real-world examples.</p>
     </div>
   </div>
 
   <div class="section-card">
     <div class="section-card-header"><h3 style="margin:0;font-size:1.05rem;color:var(--accent)">Lesson 2: The Transformer Architecture</h3></div>
     <div class="section-card-body">
-      <p>Complete architecture breakdown with symbolic notation. Scaled dot-product attention, multi-head attention, encoder vs decoder vs encoder-decoder. Layer norm, residual connections, FFN equations. Architectural diagram with data flow.</p>
+      <p>Complete architecture breakdown with symbolic notation. Scaled dot-product attention, multi-head attention, encoder vs decoder vs encoder-decoder. Layer norm, residual connections, FFN equations. Plus, we'll visualize the data flow and see why each component exists.</p>
     </div>
   </div>
 
   <div class="section-card">
     <div class="section-card-header"><h3 style="margin:0;font-size:1.05rem;color:var(--accent)">Lesson 3: Training &amp; Pretraining</h3></div>
     <div class="section-card-body">
-      <p>Pretraining objectives (causal LM, masked LM, permutation LM). Data curation pipelines, deduplication, quality filtering. Training dynamics — loss curves, learning rate schedules, batch size scaling. Compute budgets and training costs.</p>
+      <p>Pretraining objectives (causal LM, masked LM, permutation LM). Data curation pipelines, deduplication, quality filtering. Training dynamics — loss curves, learning rate schedules, batch size scaling. Compute budgets and training costs. We'll also look at emergent abilities and scaling behaviors.</p>
     </div>
   </div>
 
   <div class="section-card">
     <div class="section-card-header"><h3 style="margin:0;font-size:1.05rem;color:var(--accent)">Lesson 4: Quantization &amp; Model Compression</h3></div>
     <div class="section-card-body">
-      <p>Why quantization works. INT8, INT4, NF4 formats. Post-training quantization (GPTQ, AWQ) vs quantization-aware training. Impact on model size, quality, and inference speed. Interactive chart comparing precision/quality/size trade-offs.</p>
+      <p>Why quantization works. INT8, INT4, NF4 formats. Post-training quantization (GPTQ, AWQ) vs quantization-aware training. Impact on model size, quality, and inference speed. Interactive chart comparing precision/quality/size trade-offs. We'll also discuss when quantization hurts and how to mitigate it.</p>
     </div>
   </div>
 
   <div class="section-card">
     <div class="section-card-header"><h3 style="margin:0;font-size:1.05rem;color:var(--accent)">Lesson 5: Inference &amp; Deployment</h3></div>
     <div class="section-card-body">
-      <p>The inference stack: KV cache mechanism, memory bandwidth wall, speculative decoding, continuous batching, prefix caching. Throughput vs latency trade-offs. GPU memory budgeting for production serving.</p>
+      <p>The inference stack: KV cache mechanism, memory bandwidth wall, speculative decoding, continuous batching, prefix caching. Throughput vs latency trade-offs. GPU memory budgeting for production serving. Plus, we'll see real-world latency numbers and optimization strategies.</p>
     </div>
   </div>
 
   <div class="section-card">
     <div class="section-card-header"><h3 style="margin:0;font-size:1.05rem;color:var(--accent)">Lesson 6: Scaling Laws</h3></div>
     <div class="section-card-body">
-      <p>Kaplan et al. and Chinchilla scaling laws with empirical data. Power-law relationships between compute/data/parameters/performance. Optimal allocation for compute budgets. Interactive scaling law chart with real data points.</p>
+      <p>Kaplan et al. and Chinchilla scaling laws with empirical data. Power-law relationships between compute/data/parameters/performance. Optimal allocation for compute budgets. Interactive scaling law chart with real data points. We'll also discuss the implications for model design and the limits of scaling.</p>
     </div>
   </div>
 
   <div class="section-card">
     <div class="section-card-header"><h3 style="margin:0;font-size:1.05rem;color:var(--accent)">Lesson 7: Alignment &amp; Instruction Tuning</h3></div>
     <div class="section-card-body">
-      <p>From pretraining to helpful assistant. Instruction tuning datasets, Supervised Fine-Tuning (SFT). RLHF — reward modeling, PPO. DPO — direct preference optimization. Constitutional AI and the alignment tax.</p>
+      <p>From pretraining to helpful assistant. Instruction tuning datasets, Supervised Fine-Tuning (SFT). RLHF — reward modeling, PPO. DPO — direct preference optimization. Constitutional AI and the alignment tax. We'll also look at practical alignment techniques and failure modes.</p>
     </div>
   </div>
 
   <div class="section-card">
     <div class="section-card-header"><h3 style="margin:0;font-size:1.05rem;color:var(--accent)">Lesson 8: Modern Architecture Variants</h3></div>
     <div class="section-card-body">
-      <p>Beyond the vanilla transformer. Mixture of Experts (MoE) — routing, load balancing, expert capacity. Grouped-Query Attention (GQA), Multi-Query Attention (MQA). RoPE embeddings. Mamba — state space models for linear-time inference. FlashAttention — IO-aware exact attention.</p>
+      <p>Beyond the vanilla transformer. Mixture of Experts (MoE) — routing, load balancing, expert capacity. Grouped-Query Attention (GQA), Multi-Query Attention (MQA). RoPE embeddings. Mamba — state space models for linear-time inference. FlashAttention — IO-aware exact attention. We'll also discuss when to choose which variant.</p>
     </div>
   </div>
 

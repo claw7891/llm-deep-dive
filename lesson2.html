@@ -35,11 +35,11 @@
   <header class="lesson-header">
     <div class="lesson-meta">Lesson 2 of 8</div>
     <h1>The Transformer Architecture</h1>
-    <p class="lesson-subtitle">Complete architectural breakdown with symbolic notation and data flow</p>
+    <p class="lesson-subtitle">Complete architectural breakdown with concrete examples, numerical walkthroughs, and intuitive analogies</p>
   </header>
 
   <div class="story-hook">
-    The transformer is a remarkable piece of algorithmic engineering: a stack of identical layers, each built from just two sub-components (self-attention + feed-forward network), organized with residual connections and layer normalization. It has no recurrence, no convolution — just matrix multiplications and a softmax. Yet from this simple recipe, models like GPT-4 exhibit reasoning, creativity, and chain-of-thought. Let's understand exactly how.
+    The transformer is a remarkable piece of algorithmic engineering: a stack of identical layers, each built from just two sub-components (self-attention + feed-forward network), organized with residual connections and layer normalization. It has no recurrence, no convolution — just matrix multiplications and a softmax. Yet from this simple recipe, models like GPT-4 exhibit reasoning, creativity, and chain-of-thought. Let's understand exactly how — with real numbers and concrete examples.
   </div>
 
   <div class="tldr">
@@ -54,68 +54,85 @@
   <div class="diagram">
     <div class="diagram-header">Single Transformer Block — Data Flow Diagram</div>
     <div class="diagram-body">
-      <svg viewBox="0 0 320 380" style="width:100%;max-width:320px;">
+      <svg viewBox="0 0 340 400" style="width:100%;max-width:400px;" role="img" aria-label="Transformer block data flow diagram: input → LayerNorm → Multi-Head Attention → residual connection → LayerNorm → Feed-Forward Network → residual connection → output, repeated N times">
         <defs>
           <marker id="a2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
             <path d="M0,0 L10,5 L0,10 Z" fill="#a277ff"/>
           </marker>
+          <marker id="resArrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="5" markerHeight="5" orient="auto">
+            <path d="M0,0 L10,5 L0,10 Z" fill="#ffb347"/>
+          </marker>
         </defs>
 
         <!-- Input -->
-        <rect x="110" y="5" width="100" height="26" rx="6" fill="#24242a" stroke="#4ecdc4" stroke-width="1.5"/>
-        <text x="160" y="22" fill="#4ecdc4" font-size="10" text-anchor="middle" font-family="system-ui">x (input)</text>
+        <rect x="120" y="5" width="100" height="28" rx="6" fill="#24242a" stroke="#4ecdc4" stroke-width="1.5"/>
+        <text x="170" y="24" fill="#4ecdc4" font-size="11" text-anchor="middle" font-family="system-ui">x (input)</text>
 
         <!-- Layer Norm 1 -->
-        <rect x="110" y="40" width="100" height="26" rx="6" fill="#24242a" stroke="#a277ff" stroke-width="1.5"/>
-        <text x="160" y="57" fill="#a277ff" font-size="9" text-anchor="middle" font-family="system-ui">LayerNorm</text>
-        <line x1="160" y1="31" x2="160" y2="40" stroke="#a277ff" stroke-width="1.5" marker-end="url(#a2)"/>
+        <rect x="120" y="42" width="100" height="28" rx="6" fill="#24242a" stroke="#a277ff" stroke-width="1.5"/>
+        <text x="170" y="60" fill="#a277ff" font-size="10" text-anchor="middle" font-family="system-ui">LayerNorm</text>
+        <line x1="170" y1="33" x2="170" y2="42" stroke="#a277ff" stroke-width="1.5" marker-end="url(#a2)"/>
 
         <!-- Multi-Head Attention -->
-        <rect x="110" y="75" width="100" height="34" rx="6" fill="#24242a" stroke="#ff6b9d" stroke-width="1.5"/>
-        <text x="160" y="92" fill="#ff6b9d" font-size="9" text-anchor="middle" font-family="system-ui">Multi-Head</text>
-        <text x="160" y="103" fill="#ff6b9d" font-size="9" text-anchor="middle" font-family="system-ui">Attention</text>
-        <line x1="160" y1="66" x2="160" y2="75" stroke="#a277ff" stroke-width="1.5" marker-end="url(#a2)"/>
+        <rect x="110" y="80" width="120" height="36" rx="6" fill="#24242a" stroke="#ff6b9d" stroke-width="1.5"/>
+        <text x="170" y="98" fill="#ff6b9d" font-size="10" text-anchor="middle" font-family="system-ui">Multi-Head</text>
+        <text x="170" y="110" fill="#ff6b9d" font-size="10" text-anchor="middle" font-family="system-ui">Attention</text>
+        <line x1="170" y1="70" x2="170" y2="80" stroke="#a277ff" stroke-width="1.5" marker-end="url(#a2)"/>
 
         <!-- Residual + -->
-        <circle cx="160" cy="128" r="12" fill="#2a2a35" stroke="#ffb347" stroke-width="1.5"/>
-        <text x="160" y="132" fill="#ffb347" font-size="12" text-anchor="middle" font-family="system-ui">+</text>
-        <line x1="160" y1="109" x2="152" y2="125" stroke="#ffb347" stroke-width="1" marker-end="url(#a2)"/>
-        <line x1="160" y1="31" x2="168" y2="125" stroke="#ffb347" stroke-width="1" marker-end="url(#a2)" stroke-dasharray="4,2"/>
+        <circle cx="170" cy="135" r="12" fill="#2a2a35" stroke="#ffb347" stroke-width="2"/>
+        <text x="170" y="139" fill="#ffb347" font-size="13" text-anchor="middle" font-family="system-ui">+</text>
+        <line x1="170" y1="116" x2="163" y2="132" stroke="#ffb347" stroke-width="1.2" marker-end="url(#resArrow)"/>
+        <line x1="170" y1="33" x2="177" y2="132" stroke="#ffb347" stroke-width="1" marker-end="url(#resArrow)" stroke-dasharray="4,3"/>
 
         <!-- Layer Norm 2 -->
-        <rect x="110" y="150" width="100" height="26" rx="6" fill="#24242a" stroke="#a277ff" stroke-width="1.5"/>
-        <text x="160" y="167" fill="#a277ff" font-size="9" text-anchor="middle" font-family="system-ui">LayerNorm</text>
-        <line x1="160" y1="140" x2="160" y2="150" stroke="#a277ff" stroke-width="1.5" marker-end="url(#a2)"/>
+        <rect x="120" y="158" width="100" height="28" rx="6" fill="#24242a" stroke="#a277ff" stroke-width="1.5"/>
+        <text x="170" y="176" fill="#a277ff" font-size="10" text-anchor="middle" font-family="system-ui">LayerNorm</text>
+        <line x1="170" y1="147" x2="170" y2="158" stroke="#a277ff" stroke-width="1.5" marker-end="url(#a2)"/>
 
         <!-- FFN -->
-        <rect x="110" y="185" width="100" height="34" rx="6" fill="#24242a" stroke="#4ecdc4" stroke-width="1.5"/>
-        <text x="160" y="202" fill="#4ecdc4" font-size="9" text-anchor="middle" font-family="system-ui">Feed-Forward</text>
-        <text x="160" y="213" fill="#4ecdc4" font-size="9" text-anchor="middle" font-family="system-ui">Network</text>
-        <line x1="160" y1="176" x2="160" y2="185" stroke="#a277ff" stroke-width="1.5" marker-end="url(#a2)"/>
+        <rect x="115" y="196" width="110" height="36" rx="6" fill="#24242a" stroke="#4ecdc4" stroke-width="1.5"/>
+        <text x="170" y="214" fill="#4ecdc4" font-size="10" text-anchor="middle" font-family="system-ui">Feed-Forward</text>
+        <text x="170" y="226" fill="#4ecdc4" font-size="10" text-anchor="middle" font-family="system-ui">Network</text>
+        <line x1="170" y1="186" x2="170" y2="196" stroke="#a277ff" stroke-width="1.5" marker-end="url(#a2)"/>
 
         <!-- Residual + -->
-        <circle cx="160" cy="238" r="12" fill="#2a2a35" stroke="#ffb347" stroke-width="1.5"/>
-        <text x="160" y="242" fill="#ffb347" font-size="12" text-anchor="middle" font-family="system-ui">+</text>
-        <line x1="160" y1="219" x2="152" y2="235" stroke="#ffb347" stroke-width="1" marker-end="url(#a2)"/>
-        <line x1="160" y1="140" x2="168" y2="235" stroke="#ffb347" stroke-width="1" marker-end="url(#a2)" stroke-dasharray="4,2"/>
+        <circle cx="170" cy="251" r="12" fill="#2a2a35" stroke="#ffb347" stroke-width="2"/>
+        <text x="170" y="255" fill="#ffb347" font-size="13" text-anchor="middle" font-family="system-ui">+</text>
+        <line x1="170" y1="232" x2="163" y2="248" stroke="#ffb347" stroke-width="1.2" marker-end="url(#resArrow)"/>
+        <line x1="170" y1="147" x2="177" y2="248" stroke="#ffb347" stroke-width="1" marker-end="url(#resArrow)" stroke-dasharray="4,3"/>
 
         <!-- Output -->
-        <rect x="110" y="262" width="100" height="26" rx="6" fill="#24242a" stroke="#4ecdc4" stroke-width="1.5"/>
-        <text x="160" y="279" fill="#4ecdc4" font-size="10" text-anchor="middle" font-family="system-ui">x' (output)</text>
-        <line x1="160" y1="250" x2="160" y2="262" stroke="#a277ff" stroke-width="1.5" marker-end="url(#a2)"/>
+        <rect x="120" y="278" width="100" height="28" rx="6" fill="#24242a" stroke="#4ecdc4" stroke-width="1.5"/>
+        <text x="170" y="297" fill="#4ecdc4" font-size="11" text-anchor="middle" font-family="system-ui">x' (output)</text>
+        <line x1="170" y1="263" x2="170" y2="278" stroke="#a277ff" stroke-width="1.5" marker-end="url(#a2)"/>
 
         <!-- Stack label -->
-        <text x="160" y="325" fill="#9292a4" font-size="10" text-anchor="middle" font-family="system-ui">× N stacked layers</text>
-        <line x1="50" y1="310" x2="50" y2="340" stroke="#36364a" stroke-width="1"/>
-        <line x1="270" y1="310" x2="270" y2="340" stroke="#36364a" stroke-width="1"/>
-        <line x1="50" y1="340" x2="270" y2="340" stroke="#36364a" stroke-width="1"/>
+        <text x="170" y="343" fill="#9292a4" font-size="11" text-anchor="middle" font-family="system-ui">× N stacked layers</text>
+        <line x1="50" y1="327" x2="50" y2="360" stroke="#36364a" stroke-width="1"/>
+        <line x1="290" y1="327" x2="290" y2="360" stroke="#36364a" stroke-width="1"/>
+        <line x1="50" y1="360" x2="290" y2="360" stroke="#36364a" stroke-width="1"/>
       </svg>
     </div>
   </div>
 
-  <h2 id="attention">Scaled Dot-Product Attention</h2>
+  <h2 id="attention">Understanding Why Attention Is Needed</h2>
 
-  <p>Attention is the core innovation. Each token computes how much to focus on every other token:</p>
+  <p>Before we dive into formulas, let's build <em>intuition</em> about what attention does and why it's essential.</p>
+
+  <p>Imagine reading this sentence: <strong>"The cat sat on the mat because it was tired."</strong> What does "it" refer to? As a human reader, you immediately know "it" refers to "the cat" — not "the mat." How? You looked back at earlier words to resolve the reference.</p>
+
+  <p>This <span class="key-term">coreference resolution</span> is exactly what attention mechanisms were designed to automate. The model needs a way for each token to "look at" every other token and decide how much attention to pay to each one. The word "it" should pay strong attention to "cat," moderate attention to "sat," and very little attention to "The."</p>
+
+  <p>Without attention, a neural network processing "The cat sat on the mat" would have no way to directly connect "sat" with "cat" — they'd be processed in separate positions with limited ability to communicate. Attention is the <strong>fundamental mechanism that lets all tokens communicate pairwise</strong>.</p>
+
+  <div class="callout-tip">
+    Think of attention as a "routing" mechanism: it decides which tokens should share information with each other. Without it, each word is stuck in its own position, unable to look at or incorporate information from other words.
+  </div>
+
+  <h2 id="attention-math">Scaled Dot-Product Attention</h2>
+
+  <p>Now that we understand <em>why</em> attention matters, here's the exact computation. Each token computes how much to focus on every other token through three learned projections (Query, Key, Value):</p>
 
   <div class="math-block">
     <div class="math-block-header">Scaled Dot-Product Attention</div>
@@ -132,7 +149,7 @@
 
   <p>Step-by-step, attention computes:</p>
   <ol class="num-list">
-    <li><strong>Project</strong> input into Q, K, V spaces via learned weight matrices</li>
+    <li><strong>Project</strong> — input is transformed into Q, K, V spaces via learned weight matrices</li>
     <li><strong>Score</strong> — compute dot products QK<sup>T</sup>: each token asks "how relevant is everyone else to me?"</li>
     <li><strong>Scale</strong> by √d<sub>k</sub> — prevents softmax from saturating to 0/1 for large d<sub>k</sub></li>
     <li><strong>Softmax</strong> over the last dimension — converts scores to probabilities summing to 1</li>
@@ -143,12 +160,56 @@
     The scaling factor √d<sub>k</sub> is crucial. Without it, for large d<sub>k</sub>, the dot products grow large, pushing softmax into regions with extremely small gradients — making training unstable or impossible.
   </div>
 
+  <h3 id="concrete-example">Concrete Numerical Example: Attention by Hand</h3>
+
+  <p>Let's work through a tiny attention computation with <strong>3 tokens</strong>, each a <strong>4-dimensional vector</strong>. Use simple integers so you can follow along easily.</p>
+
+  <div class="callout">
+    <strong>Setup:</strong> Three tokens: "I" (token 0), "love" (token 1), "cats" (token 2).<br>
+    Each token is a 4D embedding vector (inevitably tiny — real models use d=4096 or more!).<br>
+    We'll use a single attention head with d<sub>k</sub> = 3 for readability.
+  </div>
+
+  <div style="background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius);padding:1rem;margin:1.2rem 0;font-family:var(--font-mono);font-size:0.85rem;overflow-x:auto;">
+    <div style="color:var(--accent3);margin-bottom:0.5rem;">// Input embedding matrix X (3 tokens × 4 dimensions)</div>
+    <div style="color:var(--text);">X = [[1, 0, 1, 0],   // "I"</div>
+    <div style="color:var(--text);">     [0, 1, 0, 1],   // "love"</div>
+    <div style="color:var(--text);">     [1, 1, 0, 0]]   // "cats"</div>
+    <br>
+    <div style="color:var(--accent3);margin-bottom:0.5rem;">// Learned projection matrices (random values chosen for clarity)</div>
+    <div style="color:var(--text);">W<sub>Q</sub> = [[1, 0, 1], [0, 1, 0], [1, 0, 0], [0, 1, 1]]  &nbsp;// (4×3)</div>
+    <div style="color:var(--text);">W<sub>K</sub> = [[0, 1, 0], [1, 0, 1], [0, 0, 1], [1, 0, 0]]  &nbsp;// (4×3)</div>
+    <br>
+    <div style="color:var(--accent3);margin-bottom:0.5rem;">// Step 1: Compute Q and K</div>
+    <div style="color:var(--text);">Q = X · W<sub>Q</sub> = [[1, 1, 1], [1, 1, 1], [1, 0, 1]]  &nbsp;// (3×3)</div>
+    <div style="color:var(--text);">K = X · W<sub>K</sub> = [[0, 1, 0], [2, 0, 1], [1, 1, 1]]  &nbsp;// (3×3)</div>
+    <br>
+    <div style="color:var(--accent3);margin-bottom:0.5rem;">// Step 2: Compute raw scores Q·K<sup>T</sup></div>
+    <div style="color:var(--text);">QK<sup>T</sup> = [[1·0+1·1+1·0, 1·2+1·0+1·1, 1·1+1·1+1·1]]</div>
+    <div style="color:var(--text);">       &nbsp;&nbsp;= [[1, 3, 3]]</div>
+    <div style="color:var(--text);">       &nbsp;&nbsp;&nbsp;&nbsp;[[1, 3, 3]]</div>
+    <div style="color:var(--text);">       &nbsp;&nbsp;&nbsp;&nbsp;[[0, 2, 2]]</div>
+    <br>
+    <div style="color:var(--accent3);margin-bottom:0.5rem;">// Step 3: Scale by √d<sub>k</sub> = √3 ≈ 1.732</div>
+    <div style="color:var(--text);">scaled = [[0.58, 1.73, 1.73], [0.58, 1.73, 1.73], [0, 1.15, 1.15]]</div>
+    <br>
+    <div style="color:var(--accent3);margin-bottom:0.5rem;">// Step 4: Softmax over last dimension</div>
+    <div style="color:var(--text);">Token "I" scores: softmax(0.58, 1.73, 1.73) = [0.15, 0.43, 0.43]</div>
+    <div style="color:var(--text);">Token "love" scores: softmax(0.58, 1.73, 1.73) = [0.15, 0.43, 0.43]</div>
+    <div style="color:var(--text);">Token "cats" scores: softmax(0, 1.15, 1.15) = [0.13, 0.43, 0.43]</div>
+    <br>
+    <div style="color:var(--accent3);margin-bottom:0.5rem;">// Interpretation: Each token distributes ~43% attention to "love" and "cats",</div>
+    <div style="color:var(--accent3);margin-bottom:0.5rem;">// and only ~15% to itself. In a real model, the projections are learned</div>
+    <div style="color:var(--accent3);margin-bottom:0.5rem;">// so attention patterns become meaningful (not uniform).</div>
+  </div>
+
   <h3>Causal (Masked) Attention</h3>
   <p>In decoder-only autoregressive models (GPT, LLaMA, etc.), attention must be <span class="key-term">causal</span> — tokens can only attend to themselves and earlier tokens. This is implemented by applying a mask before softmax:</p>
   <div class="formula">score(i, j) = q<sub>i</sub> · k<sub>j</sub> + M<sub>ij</sub>, &nbsp; M<sub>ij</sub> = 0 if j ≤ i, else −∞</div>
-  <p>Adding −∞ ensures the softmax output for future positions is zero — the model never sees tokens it hasn't generated yet.</p>
+  <p>Adding −∞ ensures the softmax output for future positions is zero — the model never sees tokens it hasn't generated yet. This is what makes generation <span class="key-term">autoregressive</span>: each token is predicted based only on what came before.</p>
 
   <h2 id="multihead">Multi-Head Attention</h2>
+
   <p>Instead of a single attention operation, transformers run <span class="key-term">h</span> parallel attention "heads", each with its own Q, K, V projections. The outputs are concatenated and projected again:</p>
 
   <div class="math-block">
@@ -157,12 +218,19 @@
       head<sub>i</sub> = Attention(XW<sub>Q,i</sub>, XW<sub>K,i</sub>, XW<sub>V,i</sub>)<br><br>
       MultiHead(X) = Concat(head<sub>1</sub>, ..., head<sub>h</sub>) · W<sub>O</sub><br><br>
       Where each head<sub>i</sub> produces d<sub>k</sub>-dimensional output,<br>
-      and W<sub>O</sub> ∈ ℝ<sup>h·d<sub>k</sub> × d</sup> is the output projection.<br><br>
-      Total dimension: d<sub>k</sub> = d / h (typically)
+      and W<sub>O</sub> ∈ ℝ<sup>h·d<sub>k</sub> × d</sup> is the output projection.<br>
+      Total dimension per head: d<sub>k</sub> = d / h (typically)
     </div>
   </div>
 
-  <p>Different heads learn different attention patterns — some focus on syntax, others on semantics, others on position. With 32 heads, a 7B model has 32 different "views" of the input sequence simultaneously.</p>
+  <div class="callout">
+    <strong>Analogy — think of each attention head as a different expert looking at the sentence:</strong><br><br>
+    • <strong>Head A</strong> checks grammar relationships — "does 'the' properly connect to 'cat'?"<br>
+    • <strong>Head B</strong> tracks entity references — "what does 'it' refer to?"<br>
+    • <strong>Head C</strong> identifies adjective-noun pairs — "'black' modifies 'cat'"<br>
+    • <strong>Head D</strong> tracks positions — "how far apart are the subject and verb?"<br><br>
+    All <strong>32 heads</strong> (in a typical 7B model) work in parallel, each generating its own attention matrix. Their outputs are concatenated and blended together, giving the model a rich, multi-faceted understanding of the sequence. It's like having 32 experts simultaneously analyze a sentence from different perspectives, then synthesizing their findings.
+  </div>
 
   <div class="widget">
     <div class="widget-header">🧠 Attention Pattern: Head Comparison</div>
@@ -170,19 +238,27 @@
       <div class="widget-controls">
         <label>Attention head:
           <select id="attention-head-select" onchange="window.drawAttentionHeatmap('attn-canvas', parseInt(this.value))">
-            <option value="0">Head 0 — Syntactic (adjacent)</option>
+            <option value="0">Head 0 — Syntactic (adjacent words)</option>
             <option value="1">Head 1 — Semantic (content words)</option>
-            <option value="2">Head 2 — Positional (diagonal)</option>
+            <option value="2">Head 2 — Positional (diagonal focus)</option>
           </select>
         </label>
       </div>
       <canvas id="attn-canvas" data-chart="attention" data-param="0" width="320" height="320" style="max-width:320px;margin:0.5rem auto;"></canvas>
-      <p class="widget-desc">Each attention head learns a different attention pattern. Select a head above to see how tokens attend to each other in a 7-token sequence "The cat sat on the mat." Darker = stronger attention weight.</p>
+      <p class="widget-desc">Each attention head learns a different attention pattern. Select a head above to see how tokens attend to each other in a 7-token sequence "The cat sat on the mat." Darker cell = stronger attention. Row = token doing the attending, Column = token being attended to.</p>
     </div>
   </div>
 
-  <h2 id="ffn">Feed-Forward Network</h2>
-  <p>Applied identically to each position. The FFN is a two-layer MLP with a hidden dimension typically 3-4× the model dimension:</p>
+  <h2 id="ffn">Feed-Forward Network (FFN)</h2>
+
+  <div class="callout-tip">
+    Here's an intuitive way to think about the two sub-layers:<br><br>
+    <strong>Self-attention</strong> is the <strong>meeting room</strong> — a space where all tokens share information with each other. Tokens discuss: "Who are you? What information do you have that I need?"<br><br>
+    <strong>FFN</strong> is each token's <strong>personal notebook</strong> — after the meeting, each token goes back to its desk and processes what it learned privately. It decides what to remember, store, and transform.<br><br>
+    Attention = <em>communication</em> between tokens. FFN = <em>computation</em> on each token individually.
+  </div>
+
+  <p>Applied identically to each position. The FFN is a two-layer MLP with a hidden dimension typically 3-4× the model dimension. The modern standard uses a gated variant called SwiGLU:</p>
 
   <div class="math-block">
     <div class="math-block-header">Feed-Forward Network (SwiGLU variant, used in LLaMA)</div>
@@ -193,14 +269,14 @@
       W<sub>down</sub> ∈ ℝ<sup>d<sub>ff</sub>×d</sup> — down projection<br>
       σ = Swish/SiLU activation: σ(x) = x · sigmoid(x)<br>
       ⊙ = element-wise multiplication<br>
-      d<sub>ff</sub> typically = 3.5 · d (varies by model)
+      d<sub>ff</sub> typically ≈ 3.5 · d (varies by model)
     </div>
   </div>
 
-  <p>The FFN stores factual knowledge — it's where the model "remembers" that Paris is the capital of France. Self-attention decides <em>which</em> tokens to retrieve information from; the FFN provides the information itself.</p>
+  <p>The FFN stores <em>factual knowledge</em> — it's where the model "remembers" that Paris is the capital of France, what a cat looks like, or how verbs conjugate. Self-attention decides <strong>which</strong> tokens to retrieve information from; the FFN provides <strong>the information itself</strong>.</p>
 
   <h2 id="layernorm">Layer Normalization</h2>
-  <p>Applied before each sub-layer (pre-norm, the modern convention — unlike the original post-norm transformer):</p>
+  <p>Applied before each sub-layer (pre-norm, the modern convention — unlike the original post-norm transformer in the "Attention Is All You Need" paper):</p>
 
   <div class="math-block">
     <div class="math-block-header">Layer Normalization</div>
@@ -214,12 +290,45 @@
     </div>
   </div>
 
-  <p>LayerNorm stabilizes training by ensuring activations have zero mean and unit variance, regardless of the input scale. <span class="key-term">RMS Norm</span> (used in LLaMA) is a simplified variant that only normalizes by the root-mean-square, omitting mean subtraction.</p>
+  <p>LayerNorm stabilizes training by ensuring activations have zero mean and unit variance, regardless of the input scale. Without it, activations can grow or shrink uncontrollably across layers, making training unstable. It's like normalizing each data sample to have similar statistics, which helps the optimizer find good parameters.</p>
+
+  <p><span class="key-term">RMS Norm</span> (used in LLaMA) is a simplified variant that only normalizes by the root-mean-square, omitting mean subtraction. It's slightly less effective but much faster to compute, which matters for models with trillions of training tokens.</p>
 
   <h2 id="residual">Residual Connections</h2>
   <p>Each sub-layer is wrapped in a residual connection that adds the input back to the output:</p>
   <div class="formula">x<sub>ℓ+1</sub> = x<sub>ℓ</sub> + Sublayer(LayerNorm(x<sub>ℓ</sub>))</div>
-  <p>Residual connections are the reason we can stack 80+ layers (like in GPT-4). Without them, gradients would vanish as they propagate back through the network. The residual path provides a "gradient highway" from the output to the input.</p>
+
+  <p>Residual connections are the reason we can stack 80+ layers (like in GPT-4). Without them, gradients would vanish as they propagate back through the network during training.</p>
+
+  <div class="callout">
+    <strong>Why residuals matter — a numerical example:</strong><br><br>
+    During backpropagation, gradients are multiplied by layer-by-layer weight matrices. In a <strong>32-layer network without residual connections</strong>, the gradient at layer 1 is approximately:<br><br>
+    g<sub>1</sub> ≈ g<sub>32</sub> · Π<sub>ℓ=1</sub><sup>32</sup> (∂Layer<sub>ℓ</sub> / ∂x<sub>ℓ</sub>)<br><br>
+    If each layer's Jacobian has a spectral norm of ~0.95 (best case), then g<sub>1</sub> ≈ g<sub>32</sub> · 0.95<sup>32</sup> ≈ 0.2 — borderline but workable.<br><br>
+    But more realistically, it's ~0.8 per layer, giving: g<sub>1</sub> ≈ g<sub>32</sub> · 0.8<sup>32</sup> ≈ 0.8<sup>32</sup> ≈ <strong>0.001</strong> — effectively zero! The early layers never learn anything.<br><br>
+    <strong>With residual connections</strong>, the gradient at each layer has a direct path back to the output (the "gradient highway"). The Jacobian of the residual branch is just the identity matrix, so gradients can flow unimpeded:
+    <div class="formula" style="margin-top:0.5rem;">∂x<sub>ℓ+1</sub> / ∂x<sub>ℓ</sub> = I + ∂Sublayer / ∂x<sub>ℓ</sub></div>
+    The identity component I ensures the gradient can <em>always</em> pass through, no matter what the sublayer does.
+  </div>
+
+  <h2 id="practical-flow">Putting It All Together: A Practical Example</h2>
+
+  <p>Let's trace what happens to the sentence <strong>"The dog chased the ball"</strong> as it passes through a transformer:</p>
+
+  <div style="background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius);padding:1rem;margin:1.2rem 0;">
+    <div style="color:var(--accent3);font-weight:600;margin-bottom:0.4rem;">Layer 1-2 (Early — Syntax)</div>
+    <div style="color:var(--text-muted);font-size:0.9rem;">Attention focuses on local structure: "The" ↔ "dog", "the" ↔ "ball". FFN learns basic grammar — determiners attach to nouns. Positional information dominates.</div>
+
+    <div style="color:var(--accent3);font-weight:600;margin-top:0.8rem;margin-bottom:0.4rem;">Layer 3-8 (Middle — Semantics)</div>
+    <div style="color:var(--text-muted);font-size:0.9rem;">Attention broadens: "dog" attends to "chased" (subject-verb), "chased" attends to "ball" (verb-object). FFN builds conceptual understanding: dogs chase, balls are chase-able objects. The model starts representing the relationship "who did what to what."</div>
+
+    <div style="color:var(--accent3);font-weight:600;margin-top:0.8rem;margin-bottom:0.4rem;">Layer 9-15+ (Late — Prediction)</div>
+    <div style="color:var(--text-muted);font-size:0.9rem;">Information is aggregated for the final output position. The last token's representation contains compressed information about the entire sentence. The FFN prepares probabilities for the <strong>next token</strong> — maybe "around" ("The dog chased the ball around"), ".", or "and".</div>
+  </div>
+
+  <div class="callout-tip">
+    This layer-by-layer progression mirrors how human language processing works: first words/syntax, then meaning, then action. Each layer builds on the previous, refining and transforming the representations. With 32, 48, or even 96 layers (GPT-4), the model builds increasingly abstract representations.
+  </div>
 
   <h2 id="encoder-decoder">Encoder vs Decoder vs Encoder-Decoder</h2>
   <table class="styled-table">
@@ -233,10 +342,13 @@
     </tbody>
   </table>
 
-  <p>Most modern LLMs (GPT-4, Claude, Gemini, LLaMA) use <span class="key-term">decoder-only</span> architectures. The decoder processes tokens causally (left-to-right) and generates text autoregressively. The encoder-decoder architecture (T5, BART) uses an encoder with full bidirectional attention to process the input, then a decoder with causal attention + cross-attention to the encoder output to generate.</p>
+  <p>Most modern LLMs (GPT-4, Claude, Gemini, LLaMA) use <span class="key-term">decoder-only</span> architectures. The decoder processes tokens causally (left-to-right) and generates text autoregressively. The key advantage: decoder-only models are simpler to train and scale, and they handle any text generation task with the same architecture.</p>
+
+  <p>The encoder-decoder architecture (T5, BART) uses an encoder with full bidirectional attention to process the input holistically, then a decoder with causal attention + cross-attention to the encoder output to generate. This is preferred for tasks like translation where the input is fully known upfront and the output needs to be generated from it.</p>
 
   <h2 id="parameter">Parameter Accounting</h2>
-  <p>For a typical decoder-only transformer with d = 4096 (7B-scale):</p>
+  <p>For a typical decoder-only transformer with d = 4096 (7B-scale, 32 layers):</p>
+  <div class="styled-table" style="overflow-x:auto;">
   <table class="styled-table">
     <thead>
       <tr><th>Component</th><th>Shape</th><th>Parameters</th><th>Fraction</th></tr>
@@ -250,19 +362,54 @@
       <tr><td>LayerNorm (per layer)</td><td>2 × d</td><td>8k × 32 = 0.3M</td><td>negligible</td></tr>
     </tbody>
   </table>
+  </div>
 
   <div class="callout">
-    <strong>Key insight:</strong> The FFN accounts for ~2/3 of parameters in most transformers. Attention is expensive in FLOPs (O(L²)) but relatively cheap in parameters. Scaling the FFN hidden dimension is the most parameter-efficient way to increase model capacity.
+    <strong>Key insight:</strong> The FFN accounts for ~2/3 of parameters in most transformers. Attention is expensive in FLOPs (O(L²)) but relatively cheap in parameters. Scaling the FFN hidden dimension is the most parameter-efficient way to increase model capacity. This is why modern models use FFN ratios of 3-4× the model dimension — it gives the most "knowledge storage" per parameter.
+  </div>
+
+  <h3>FLOPs vs Parameters: A Quick Comparison</h3>
+
+  <div style="background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius);padding:1rem;margin:1.2rem 0;overflow-x:auto;">
+    <table style="width:100%;border-collapse:collapse;font-size:0.85rem;">
+      <thead><tr>
+        <th style="text-align:left;padding:0.4rem 0.6rem;color:var(--text-muted);border-bottom:1px solid var(--border);">Component</th>
+        <th style="text-align:left;padding:0.4rem 0.6rem;color:var(--text-muted);border-bottom:1px solid var(--border);">FLOPs per layer</th>
+        <th style="text-align:left;padding:0.4rem 0.6rem;color:var(--text-muted);border-bottom:1px solid var(--border);">Parameters</th>
+        <th style="text-align:left;padding:0.4rem 0.6rem;color:var(--text-muted);border-bottom:1px solid var(--border);">Trade-off</th>
+      </tr></thead>
+      <tbody>
+        <tr style="color:var(--text);">
+          <td style="padding:0.4rem 0.6rem;border-bottom:1px solid var(--border);font-weight:600;color:var(--accent);">Attention</td>
+          <td style="padding:0.4rem 0.6rem;border-bottom:1px solid var(--border);">O(n² · d)</td>
+          <td style="padding:0.4rem 0.6rem;border-bottom:1px solid var(--border);">4d²</td>
+          <td style="padding:0.4rem 0.6rem;border-bottom:1px solid var(--border);">FLOPs scale quadratically with sequence length</td>
+        </tr>
+        <tr style="color:var(--text);">
+          <td style="padding:0.4rem 0.6rem;border-bottom:1px solid var(--border);font-weight:600;color:var(--accent);">FFN</td>
+          <td style="padding:0.4rem 0.6rem;border-bottom:1px solid var(--border);">O(n · d · d<sub>ff</sub>)</td>
+          <td style="padding:0.4rem 0.6rem;border-bottom:1px solid var(--border);">3d · d<sub>ff</sub></td>
+          <td style="padding:0.4rem 0.6rem;border-bottom:1px solid var(--border);">FLOPs scale linearly with sequence length</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="callout-tip">
+    For long sequences (8K+ tokens), attention dominates compute. For short sequences (1K tokens), the FFN dominates. This trade-off drives specialized architectures: for long-document models, people use sparse or linear attention; for code generation, people grow the FFN.
   </div>
 
   <h2 id="summary">Summary</h2>
   <ul class="content-list">
-    <li>Transformer block: <code>LN(x + MHA(LN(x))) → LN(x + FFN(LN(x)))</code></li>
-    <li><strong>Self-attention</strong> enables all-to-all token communication with O(L²) cost</li>
-    <li><strong>Multi-head</strong> gives the model multiple parallel views of relationships</li>
-    <li><strong>FFN</strong> stores factual knowledge, processes each token independently</li>
-    <li><strong>LayerNorm + residual</strong> connections enable stable training at depth</li>
-    <li>Modern LLMs use <strong>decoder-only</strong> architecture with causal attention</li>
+    <li><strong>WHY attention:</strong> tokens need to communicate — "it" needs to know what it refers to, verbs need subjects, etc.</li>
+    <li><strong>HOW attention works:</strong> Q, K, V projections → dot product scores → scale by √d<sub>k</sub> → softmax → weighted sum</li>
+    <li><strong>Multi-head:</strong> 32 parallel "expert" views of relationships, combined for richer understanding</li>
+    <li><strong>FFN = personal notebook:</strong> each token processes what it learned in the attention "meeting room"</li>
+    <li><strong>Residual connections = gradient highway:</strong> enabling 80+ layers by preventing gradient vanishing</li>
+    <li><strong>LayerNorm = stabilizer:</strong> keeps activations in a healthy numeric range</li>
+    <li>Transformer block formula: <code>LN(x + MHA(LN(x))) → LN(x + FFN(LN(x)))</code></li>
+    <li>Early layers → syntax, middle layers → semantics, later layers → prediction</li>
+    <li>Modern LLMs use <strong>decoder-only</strong> architecture with causal (masked) attention</li>
   </ul>
 
   <div class="completion-box">

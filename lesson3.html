@@ -35,17 +35,31 @@
   <header class="lesson-header">
     <div class="lesson-meta">Lesson 3 of 8</div>
     <h1>Training &amp; Pretraining</h1>
-    <p class="lesson-subtitle">Training objectives, data pipelines, training dynamics, and compute budgets</p>
+    <p class="lesson-subtitle">Training objectives, data pipelines, training dynamics, compute budgets, and what can go wrong</p>
   </header>
 
   <div class="story-hook">
-    Pretraining an LLM is the largest engineering effort in machine learning. A single training run on a 70B-parameter model consumes thousands of GPUs for months, costs tens of millions of dollars, and processes trillions of tokens. Understanding the training process is essential for knowing what these models actually learn — and what they miss.
+    Pretraining an LLM is the largest engineering effort in machine learning. A single training run on a 70B-parameter model consumes thousands of GPUs for months, costs tens of millions of dollars, and processes trillions of tokens. Understanding the training process is essential for knowing what these models actually learn — and what they miss. Let's walk through everything with concrete examples.
   </div>
 
   <div class="tldr">
     <div class="tldr-label">TL;DR</div>
-    <p>LLMs are trained on trillions of tokens of internet text using next-token prediction (autoregressive language modeling). The loss is cross-entropy between predicted and actual next token. Training uses distributed data parallelism across thousands of GPUs, AdamW optimizer with cosine learning rate schedule, and gradient clipping. Data quality matters as much as quantity — deduplication, filtering, and curation are critical.</p>
+    <p>LLMs are trained on trillions of tokens of internet text using next-token prediction (autoregressive language modeling). The loss is cross-entropy between predicted and actual next token. Training uses distributed data parallelism across thousands of GPUs, AdamW optimizer with cosine learning rate schedule, and gradient clipping. Data quality matters as much as quantity — deduplication, filtering, and curation are critical. Compute cost roughly follows 6·N·D FLOPs.</p>
   </div>
+
+  <h2 id="intuitive-objective">The Core Idea: Guessing the Next Word</h2>
+
+  <p>Imagine you're reading a book where the <strong>last word of every sentence is covered</strong> with a sticky note. Your job is to guess that word:</p>
+
+  <div style="background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius);padding:1rem;margin:1.2rem 0;font-family:var(--font-mono);font-size:0.95rem;">
+    <div style="color:var(--text-muted);">"The cat sat on the <span style="background:var(--bg-accent);color:var(--accent3);padding:0.1rem 0.3rem;border-radius:3px;">[???]</span>"</div>
+    <div style="color:var(--text-muted);margin-top:0.4rem;">"She opened the door and walked <span style="background:var(--bg-accent);color:var(--accent3);padding:0.1rem 0.3rem;border-radius:3px;">[???]</span>"</div>
+    <div style="color:var(--text-muted);margin-top:0.4rem;">"Python is a popular programming <span style="background:var(--bg-accent);color:var(--accent3);padding:0.1rem 0.3rem;border-radius:3px;">[???]</span>"</div>
+  </div>
+
+  <p>You'd guess "mat", "in", and "language" respectively. That's exactly what an LLM does during pretraining — but with <span class="key-term">trillions</span> of sentences from the internet, books, and code.</p>
+
+  <p>The model sees the tokens up to position <em>t</em> and must predict the token at position <em>t</em>+1. It starts terrible (random guesses) and over trillions of examples gradually learns the statistical patterns of language: grammar, facts, reasoning, style, everything.</p>
 
   <h2 id="objectives">Pretraining Objectives</h2>
 
@@ -61,35 +75,118 @@
 
   <p>This is simply the negative log-likelihood of the entire sequence under the model. Minimizing this loss is equivalent to maximizing the probability the model assigns to the training data.</p>
 
+  <h4>Concrete Example: Next-Token Prediction</h4>
+
+  <p>Let's trace a tiny example. Suppose our model has a vocabulary of just 5 words: {"the", "cat", "sat", "mat", "."}. Given input "The cat sat on the", the model needs to predict the next token. Let's say the correct answer is "mat".</p>
+
+  <div style="background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius);padding:1rem;margin:1.2rem 0;overflow-x:auto;">
+    <div style="color:var(--accent3);margin-bottom:0.5rem;">// Input: "The cat sat on the" → model produces logits (raw scores)</div>
+    <div style="color:var(--text);">logits = ["the": -1.2, "cat": -3.5, "sat": -2.8, "mat": +2.1, ".": -0.5]</div>
+    <br>
+    <div style="color:var(--accent3);margin-bottom:0.5rem;">// Softmax converts to probabilities</div>
+    <div style="color:var(--text);">probs = ["the": 0.04, "cat": 0.01, "sat": 0.01, "mat": 0.89, ".": 0.05]</div>
+    <br>
+    <div style="color:var(--accent3);margin-bottom:0.5rem;">// The correct answer is "mat" (index 3). Loss = -log(0.89) ≈ 0.12</div>
+    <div style="color:var(--accent3);margin-bottom:0.5rem;">// If the model were wrong (e.g., "the": 0.78, "mat": 0.02), loss = -log(0.02) ≈ 3.91</div>
+  </div>
+
+  <p>The model processes every position simultaneously (thanks to causal masking), computing a loss at each position. For the sentence "The cat sat on the mat" (6 tokens), it computes losses at 5 positions (no loss for the first token):</p>
+
+  <div style="background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius);padding:1rem;margin:1.2rem 0;overflow-x:auto;">
+    <table style="width:100%;border-collapse:collapse;font-size:0.85rem;">
+      <thead><tr>
+        <th style="text-align:left;padding:0.4rem 0.6rem;color:var(--text-muted);border-bottom:1px solid var(--border);">Context</th>
+        <th style="text-align:left;padding:0.4rem 0.6rem;color:var(--text-muted);border-bottom:1px solid var(--border);">Target</th>
+        <th style="text-align:left;padding:0.4rem 0.6rem;color:var(--text-muted);border-bottom:1px solid var(--border);">Model Prediction</th>
+        <th style="text-align:left;padding:0.4rem 0.6rem;color:var(--text-muted);border-bottom:1px solid var(--border);">Loss</th>
+      </tr></thead>
+      <tbody>
+        <tr style="color:var(--text);"><td style="padding:0.3rem 0.6rem;border-bottom:1px solid var(--border);">[The]</td><td style="padding:0.3rem 0.6rem;border-bottom:1px solid var(--border);color:var(--accent3);">cat</td><td style="padding:0.3rem 0.6rem;border-bottom:1px solid var(--border);">P(cat|The)=0.45</td><td style="padding:0.3rem 0.6rem;border-bottom:1px solid var(--border);">0.80</td></tr>
+        <tr style="color:var(--text);"><td style="padding:0.3rem 0.6rem;border-bottom:1px solid var(--border);">[The, cat]</td><td style="padding:0.3rem 0.6rem;border-bottom:1px solid var(--border);color:var(--accent3);">sat</td><td style="padding:0.3rem 0.6rem;border-bottom:1px solid var(--border);">P(sat|...)=0.52</td><td style="padding:0.3rem 0.6rem;border-bottom:1px solid var(--border);">0.65</td></tr>
+        <tr style="color:var(--text);"><td style="padding:0.3rem 0.6rem;border-bottom:1px solid var(--border);">[The, cat, sat]</td><td style="padding:0.3rem 0.6rem;border-bottom:1px solid var(--border);color:var(--accent3);">on</td><td style="padding:0.3rem 0.6rem;border-bottom:1px solid var(--border);">P(on|...)=0.38</td><td style="padding:0.3rem 0.6rem;border-bottom:1px solid var(--border);">0.97</td></tr>
+        <tr style="color:var(--text);"><td style="padding:0.3rem 0.6rem;border-bottom:1px solid var(--border);">[The, cat, sat, on]</td><td style="padding:0.3rem 0.6rem;border-bottom:1px solid var(--border);color:var(--accent3);">the</td><td style="padding:0.3rem 0.6rem;border-bottom:1px solid var(--border);">P(the|...)=0.61</td><td style="padding:0.3rem 0.6rem;border-bottom:1px solid var(--border);">0.49</td></tr>
+        <tr style="color:var(--text);"><td style="padding:0.3rem 0.6rem;border-bottom:1px solid var(--border);">[The, cat, sat, on, the]</td><td style="padding:0.3rem 0.6rem;border-bottom:1px solid var(--border);color:var(--accent3);">mat</td><td style="padding:0.3rem 0.6rem;border-bottom:1px solid var(--border);">P(mat|...)=0.89</td><td style="padding:0.3rem 0.6rem;border-bottom:1px solid var(--border);color:var(--success);">0.12</td></tr>
+      </tbody>
+    </table>
+    <div style="margin-top:0.5rem;color:var(--accent3);font-family:var(--font-mono);">Total loss for this sentence: 0.80+0.65+0.97+0.49+0.12 = 3.03</div>
+  </div>
+
+  <p>The loss for each training batch (typically 2M-4M tokens across all sequences) is averaged, and the gradient is computed to update model parameters. <strong>The model never "knows" the correct answer in advance</strong> — it can only use context to the left for each position.</p>
+
+  <h3>Why Cross-Entropy?</h3>
+
+  <div class="callout">
+    <strong>Cross-entropy measures how wrong your probability distribution is.</strong><br><br>
+    Let's say your model produces probability P = [0.04, 0.01, 0.01, 0.89, 0.05] over 5 vocabulary words, and the correct answer is index 3 ("mat"). Cross-entropy is:<br><br>
+    <div class="formula">H(P, true) = −log(P[3]) = −log(0.89) ≈ 0.12</div><br>
+    Why does this make sense?<br><br>
+    • If the model assigns <strong>90% to "mat"</strong> → loss is low (~0.10). The model is confident and correct.<br>
+    • If the model assigns <strong>0.1% to "mat" and 50% to "stove"</strong> → loss is high (~6.9). The model is confident about the wrong answer — heavily penalized.<br>
+    • If the model is <strong>unsure but close</strong> — 30% to "mat", 30% to "rug", 20% to "floor" → loss is about 1.2. Not great but not catastrophic.<br><br>
+    The model learns to shift probability mass away from wrong answers and toward the correct one. Over trillions of training tokens, this forces the model to learn the intricate patterns of language.
+  </div>
+
   <h3>Masked Language Modeling</h3>
   <p>Used by BERT and other encoder-only models. Randomly mask 15% of tokens and predict them from bidirectional context:</p>
   <div class="formula">L = −Σ<sub>t ∈ masked</sub> log P(x<sub>t</sub> | x<sub>≠t</sub>)</div>
 
+  <p>Unlike autoregressive modeling, masked LM uses <strong>both left and right context</strong> to predict the masked word. Input: "The [MASK] sat on the [MASK]" → output: "cat", "mat". This is great for understanding but can't generate text (you can't produce a sequence left-to-right with bidirectional masks).</p>
+
   <h2 id="data">Data Curation Pipeline</h2>
-  <p>Raw internet text is noisy, duplicated, and often low-quality. Modern pretraining pipelines apply extensive filtering:</p>
+  <p>Raw internet text is noisy, duplicated, and often low-quality. Modern pretraining pipelines apply extensive filtering. <em>Data quality is as important as data quantity.</em></p>
 
   <div class="info-grid">
     <div class="info-item"><strong>Deduplication</strong>Remove near-duplicate documents (MinHash LSH), duplicate n-gram sequences</div>
     <div class="info-item"><strong>Quality filtering</strong>Heuristic rules (perplexity thresholds), classifier-based (fastText, CCNet), domain filtering</div>
-    <div class="info-item"><strong>Toxicity</strong>Blocklist URLs, hate speech classifiers, PII redaction</div>
+    <div class="info-item"><strong>Toxicity / Safety</strong>Blocklist URLs, hate speech classifiers, PII redaction</div>
     <div class="info-item"><strong>Data mixing</strong>Weighted sampling: web text + books + code + academic papers</div>
   </div>
 
-  <p>The LLaMA 3 dataset (15T+ tokens) was curated by training a small language model to score document quality and filtering based on those scores. High-quality data (books, academic papers) is upsampled; low-quality web text is downsampled or discarded.</p>
+  <h3>Why Deduplication Matters — A Concrete Example</h3>
+
+  <p>Imagine you're training on a raw crawl of the web. Without deduplication:</p>
+
+  <div style="background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius);padding:1rem;margin:1.2rem 0;">
+    <div style="color:var(--accent2);font-weight:600;margin-bottom:0.4rem;">⚠️ The Problem</div>
+    <div style="color:var(--text-muted);font-size:0.9rem;">A single Wikipedia article "History of the French Revolution" might appear <strong>once</strong> on Wikipedia, but be copied verbatim on 50 different blog sites, 3 essay databases, and 2 forum threads. Without deduplication, that article is effectively seen <strong>56 times</strong> — it gets 56× more training weight than it deserves.</div>
+
+    <div style="color:var(--accent3);font-weight:600;margin-top:0.8rem;margin-bottom:0.4rem;">✅ The Solution: MinHash LSH</div>
+    <div style="color:var(--text-muted);font-size:0.9rem;">MinHash converts documents into compact "fingerprints" (sets of hash values). Two news articles about the same event by different outlets will have <strong>similar fingerprints</strong>. Locality-Sensitive Hashing (LSH) groups documents with fingerprint similarity > 0.8 (or whatever threshold) — these are flagged as near-duplicates. Only one copy is kept.</div>
+
+    <div style="color:var(--accent3);font-weight:600;margin-top:0.8rem;margin-bottom:0.4rem;">The Scale</div>
+    <div style="color:var(--text-muted);font-size:0.9rem;">Deduplication typically removes <strong>30-50%</strong> of raw CommonCrawl data. The LLaMA 3 dataset started from ~50T tokens of raw web text and was deduplicated down to ~15T tokens. The removed data wasn't adding information — it was just repetition.</div>
+  </div>
+
+  <h3>Data Quality Filtering</h3>
+
+  <p>The LLaMA 3 dataset (15T+ tokens) was curated by training a small language model (a tiny transformer) to score document quality. Documents that looked like coherent English text (low perplexity to a reference model) scored higher. Low-quality pages (SEO spam, auto-generated content, gibberish) scored low and were discarded or downsampled.</p>
+
+  <p>Common quality heuristics include:</p>
+  <ul class="content-list">
+    <li><strong>Perplexity threshold:</strong> run a small reference LM on the document; discard if perplexity is too high (too much noise)</li>
+    <li><strong>Character-to-word ratio:</strong> pure spam often has unusual ratios</li>
+    <li><strong>Minimum document length:</strong> discard pages under 50 words</li>
+    <li><strong>Language ID:</strong> filter to target languages (English, etc.)</li>
+    <li><strong>URL blocklist:</strong> known spam domains</li>
+  </ul>
 
   <h3>Typical Data Mix (LLaMA 2)</h3>
+  <div style="overflow-x:auto;">
   <table class="styled-table">
-    <thead><tr><th>Data Source</th><th>Fraction</th><th>Epochs</th></tr></thead>
+    <thead><tr><th>Data Source</th><th>Fraction</th><th>Epochs</th><th>What it teaches</th></tr></thead>
     <tbody>
-      <tr><td>CommonCrawl (web)</td><td>67%</td><td>1.1</td></tr>
-      <tr><td>C4 (curated web)</td><td>15%</td><td>1.1</td></tr>
-      <tr><td>Wikipedia</td><td>4.5%</td><td>2.9</td></tr>
-      <tr><td>Books</td><td>4.5%</td><td>2.3</td></tr>
-      <tr><td>ArXiv (science)</td><td>2.5%</td><td>1.5</td></tr>
-      <tr><td>Stack Exchange (QA)</td><td>2.0%</td><td>2.0</td></tr>
-      <tr><td>GitHub (code)</td><td>4.5%</td><td>1.0</td></tr>
+      <tr><td>CommonCrawl (web)</td><td>67%</td><td>1.1</td><td>General language, broad knowledge</td></tr>
+      <tr><td>C4 (curated web)</td><td>15%</td><td>1.1</td><td>Cleaner web text</td></tr>
+      <tr><td>Wikipedia</td><td>4.5%</td><td>2.9</td><td>Factual knowledge</td></tr>
+      <tr><td>Books</td><td>4.5%</td><td>2.3</td><td>Long-form narrative, rich vocabulary</td></tr>
+      <tr><td>ArXiv (science)</td><td>2.5%</td><td>1.5</td><td>Scientific reasoning, math notation</td></tr>
+      <tr><td>Stack Exchange (QA)</td><td>2.0%</td><td>2.0</td><td>Question-answering format</td></tr>
+      <tr><td>GitHub (code)</td><td>4.5%</td><td>1.0</td><td>Programming syntax, logic</td></tr>
     </tbody>
   </table>
+  </div>
+
+  <p>Note that books and Wikipedia are seen for <strong>multiple epochs</strong> (2-3 passes), while web data and code are seen for just over 1 epoch. High-quality sources get repeated exposure; lower-quality web text gets a single pass.</p>
 
   <h2 id="optimization">Training Optimization</h2>
 
@@ -99,32 +196,79 @@
   <div class="math-block">
     <div class="math-block-header">AdamW Update (per parameter θ)</div>
     <div class="math-block-body">
-      m<sub>t</sub> = β₁ · m<sub>t−1</sub> + (1 − β₁) · g<sub>t</sub> &nbsp; (biased first moment)<br>
-      v<sub>t</sub> = β₂ · v<sub>t−1</sub> + (1 − β₂) · g<sub>t</sub>² &nbsp; (biased second moment)<br><br>
+      m<sub>t</sub> = β₁ · m<sub>t−1</sub> + (1 − β₁) · g<sub>t</sub> &nbsp; (biased first moment — "momentum")<br>
+      v<sub>t</sub> = β₂ · v<sub>t−1</sub> + (1 − β₂) · g<sub>t</sub>² &nbsp; (biased second moment — "velocity")<br><br>
       m̂<sub>t</sub> = m<sub>t</sub> / (1 − β₁ᵗ) &nbsp; (bias correction)<br>
       v̂<sub>t</sub> = v<sub>t</sub> / (1 − β₂ᵗ) &nbsp; (bias correction)<br><br>
       θ<sub>t</sub> = θ<sub>t−1</sub> − η · m̂<sub>t</sub> / (√v̂<sub>t</sub> + ε) − λ · η · θ<sub>t−1</sub>
     </div>
   </div>
+
+  <div class="callout-tip">
+    <strong>Intuition for AdamW terms:</strong><br>
+    • <strong>Momentum (m<sub>t</sub>):</strong> If the gradient has been consistently pointing in one direction, accelerate in that direction. Like a ball rolling down a hill — it builds speed.<br>
+    • <strong>Velocity (v<sub>t</sub>):</strong> Parameters with consistently small gradients get larger updates (higher learning rate). Parameters with large, noisy gradients get smaller updates. This adapts the learning rate per-parameter.<br>
+    • <strong>Weight decay (λ·η·θ):</strong> Gently pushes all weights toward zero, preventing any single parameter from growing too large and dominating. This is a simple but effective regularization.
+  </div>
+
   <p>Typical hyperparameters: β₁ = 0.9, β₂ = 0.95, ε = 10⁻⁸, weight decay λ = 0.1</p>
 
-  <h3>Learning Rate Schedule: Cosine Decay</h3>
+  <h3>Learning Rate Schedule: Cosine Decay with Warmup</h3>
   <p>The learning rate follows a cosine curve: linear warmup from 0 to max_lr over the first ~2,000 steps, then cosine decay to ~10% of max_lr over the remaining steps:</p>
   <div class="formula">η(t) = η<sub>max</sub> · ½(1 + cos(π · t / T)) &nbsp; (after warmup)</div>
-  <p>This schedule allows the model to "settle" into a good minimum — high LR early for fast exploration, low LR later for fine-grained convergence.</p>
+
+  <div class="callout">
+    <strong>Why this schedule?</strong><br><br>
+    • <strong>Warmup (first ~2,000 steps):</strong> Early in training, the model is random and gradients are chaotic. Jumping straight to a high learning rate would cause divergence — parameter updates would be too large and the loss would explode. Warmup lets the model stabilize first.<br><br>
+    • <strong>High LR (early training):</strong> Fast exploration of the loss landscape. The model quickly learns broad patterns.<br><br>
+    • <strong>Low LR (late training):</strong> Fine-grained convergence. Small updates let the model "settle" into a good minimum without overshooting. The LR doesn't go to zero — it stays at ~10% of max to allow continued learning.<br><br>
+    Think of it like a search: first you run fast to find promising areas, then you slow down to explore the details of the best area.
+  </div>
 
   <h2 id="batch">Batch Size Scaling</h2>
-  <p>LLM training uses very large batch sizes (millions of tokens per batch) and scales the learning rate with batch size according to empirical heuristics:</p>
+  <p>LLM training uses very large batch sizes (millions of tokens per batch) and scales the learning rate with batch size:</p>
 
-  <div class="formula">η(B) = η<sub>ref</sub> · √(B / B<sub>ref</sub>) &nbsp; (or linear scaling for small batches)</div>
+  <div class="formula">η(B) = η<sub>ref</sub> · √(B / B<sub>ref</sub>) &nbsp; (sqrt scaling for large batches)</div>
 
-  <p>LLaMA 2 70B trained with a batch size of 4M tokens across 2,000 GPUs. Each step processes 4M tokens, and the model saw 2T tokens total → 500,000 training steps.</p>
+  <p>Larger batches give more accurate gradient estimates, allowing a larger learning rate. LLaMA 2 70B trained with a <strong>batch size of 4M tokens</strong> across 2,000 GPUs. Each step processes 4M tokens, and the model saw 2T tokens total → 2T / 4M = <strong>500,000 training steps</strong>.</p>
 
   <h2 id="compute">Compute Budget</h2>
   <p>Training compute is measured in <span class="key-term">FLOPs</span> (floating-point operations). For a forward and backward pass on a single token with a dense transformer:</p>
-  <div class="formula">C<sub>train</sub> ≈ 6 · N · D</div>
-  <p>Where N = number of parameters, D = number of training tokens. The factor 6 comes from: ~2 FLOPs/parameter/token for forward pass + ~4 FLOPs/parameter/token for backward pass.</p>
 
+  <div class="math-block">
+    <div class="math-block-header">Training Compute (Kaplan et al. 2020)</div>
+    <div class="math-block-body">
+      C<sub>train</sub> ≈ 6 · N · D<br><br>
+      Where N = number of parameters, D = number of training tokens.<br><br>
+      The factor 6 comes from:<br>
+      • Forward pass: ~2 FLOPs/parameter/token<br>
+      • Backward pass (gradients): ~4 FLOPs/parameter/token<br>
+      • Total: 2 + 4 = 6
+    </div>
+  </div>
+
+  <h3>Making Compute Tangible: A Numerical Example</h3>
+
+  <div style="background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius);padding:1rem;margin:1.2rem 0;">
+    <div style="color:var(--accent3);font-weight:600;margin-bottom:0.4rem;">Training LLaMA 2 70B (70 billion parameters, 2 trillion tokens)</div>
+
+    <div style="color:var(--text-muted);font-size:0.9rem;margin-top:0.5rem;">
+      1. <strong>Total FLOPs needed:</strong> C = 6 × 70×10⁹ × 2×10¹² = 8.4 × 10²³ FLOPs<br><br>
+      2. <strong>GPU capability:</strong> An NVIDIA H100 GPU provides ~1979 TFLOPS (1.98 × 10¹⁵ FLOPs/second) for FP16<br><br>
+      3. <strong>Single-GPU time:</strong> 8.4 × 10²³ / 1.98 × 10¹⁵ ≈ 424 million GPU-seconds<br><br>
+      4. <strong>Convert to human units:</strong><br>
+      &nbsp;&nbsp;&nbsp;&nbsp;• 424M sec / 3600 ≈ <strong>118,000 GPU-hours</strong><br>
+      &nbsp;&nbsp;&nbsp;&nbsp;• 118,000 / 24 ≈ <strong>4,900 GPU-days</strong><br>
+      &nbsp;&nbsp;&nbsp;&nbsp;• 4,900 / 365 ≈ <strong>13.4 GPU-years</strong><br><br>
+      5. <strong>With parallelism:</strong> If you have <strong>2,000 H100 GPUs</strong> running in parallel, that's:<br>
+      &nbsp;&nbsp;&nbsp;&nbsp;• 118,000 / 2,000 ≈ <strong>59 hours</strong> ≈ <strong>2.4 days</strong><br><br>
+      6. <strong>Realistically</strong>, with parallelism overhead (communication, pipeline bubbles, failures), expect about <strong>2-3×</strong> this time. The actual LLaMA 2 70B training took 21 days on 2,000 A100 GPUs (A100s are about 40% slower than H100s).
+    </div>
+  </div>
+
+  <p>Here's the breakdown for several well-known models:</p>
+
+  <div style="overflow-x:auto;">
   <table class="styled-table">
     <thead><tr><th>Model</th><th>Parameters</th><th>Tokens</th><th>Train FLOPs</th><th>GPU·hours</th><th>Estimated cost</th></tr></thead>
     <tbody>
@@ -134,21 +278,125 @@
       <tr><td>GPT-4 (estimated)</td><td>~1.8T</td><td>~13T</td><td>~1.4 × 10²⁵</td><td>~50-100M H100-hrs</td><td>~$100-200M</td></tr>
     </tbody>
   </table>
+  </div>
+
+  <div class="callout-tip">
+    Notice the <strong>staggering scale jump</strong>: GPT-4 is estimated to have required <strong>$100-200M</strong> in compute alone. That's more than the total budget of many AI startups. The trend is accelerating — some models being trained in 2024-2025 are estimated to cost $500M-$1B.
+  </div>
 
   <h2 id="distributed">Distributed Training</h2>
-  <p>Training a 70B model requires more memory than a single GPU can hold. Three levels of parallelism are combined:</p>
+  <p>Training a 70B model requires more memory than a single GPU can hold. A single A100 has 80GB of memory; a 70B model in FP16 needs 140GB just for weights — let alone optimizer states and gradients. Three levels of parallelism are combined:</p>
+
+  <div class="diagram">
+    <div class="diagram-header">Distributed Training — How Gradients Are All-Reduced Across GPUs</div>
+    <div class="diagram-body">
+      <svg viewBox="0 0 380 300" style="width:100%;max-width:420px;" role="img" aria-label="All-reduce gradient synchronization across 4 GPUs">
+        <defs>
+          <marker id="gArrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="5" markerHeight="5" orient="auto">
+            <path d="M0,0 L10,5 L0,10 Z" fill="#a277ff"/>
+          </marker>
+          <marker id="rArrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="5" markerHeight="5" orient="auto">
+            <path d="M0,0 L10,5 L0,10 Z" fill="#ff6b9d"/>
+          </marker>
+        </defs>
+
+        <!-- 4 GPUs top row -->
+        <rect x="15" y="15" width="75" height="40" rx="6" fill="#24242a" stroke="#4ecdc4" stroke-width="1.5"/>
+        <text x="52" y="35" fill="#4ecdc4" font-size="9" text-anchor="middle" font-family="system-ui">GPU 0</text>
+        <text x="52" y="48" fill="#4ecdc4" font-size="8" text-anchor="middle" font-family="system-ui">batch A</text>
+
+        <rect x="108" y="15" width="75" height="40" rx="6" fill="#24242a" stroke="#4ecdc4" stroke-width="1.5"/>
+        <text x="145" y="35" fill="#4ecdc4" font-size="9" text-anchor="middle" font-family="system-ui">GPU 1</text>
+        <text x="145" y="48" fill="#4ecdc4" font-size="8" text-anchor="middle" font-family="system-ui">batch B</text>
+
+        <rect x="200" y="15" width="75" height="40" rx="6" fill="#24242a" stroke="#4ecdc4" stroke-width="1.5"/>
+        <text x="237" y="35" fill="#4ecdc4" font-size="9" text-anchor="middle" font-family="system-ui">GPU 2</text>
+        <text x="237" y="48" fill="#4ecdc4" font-size="8" text-anchor="middle" font-family="system-ui">batch C</text>
+
+        <rect x="292" y="15" width="75" height="40" rx="6" fill="#24242a" stroke="#4ecdc4" stroke-width="1.5"/>
+        <text x="329" y="35" fill="#4ecdc4" font-size="9" text-anchor="middle" font-family="system-ui">GPU 3</text>
+        <text x="329" y="48" fill="#4ecdc4" font-size="8" text-anchor="middle" font-family="system-ui">batch D</text>
+
+        <!-- Arrows down to gradients -->
+        <line x1="52" y1="55" x2="52" y2="85" stroke="#a277ff" stroke-width="1.2" marker-end="url(#gArrow)"/>
+        <line x1="145" y1="55" x2="145" y2="85" stroke="#a277ff" stroke-width="1.2" marker-end="url(#gArrow)"/>
+        <line x1="237" y1="55" x2="237" y2="85" stroke="#a277ff" stroke-width="1.2" marker-end="url(#gArrow)"/>
+        <line x1="329" y1="55" x2="329" y2="85" stroke="#a277ff" stroke-width="1.2" marker-end="url(#gArrow)"/>
+
+        <!-- Local gradients -->
+        <rect x="15" y="88" width="75" height="30" rx="6" fill="#24242a" stroke="#a277ff" stroke-width="1"/>
+        <text x="52" y="108" fill="#a277ff" font-size="8" text-anchor="middle" font-family="system-ui">grad A</text>
+
+        <rect x="108" y="88" width="75" height="30" rx="6" fill="#24242a" stroke="#a277ff" stroke-width="1"/>
+        <text x="145" y="108" fill="#a277ff" font-size="8" text-anchor="middle" font-family="system-ui">grad B</text>
+
+        <rect x="200" y="88" width="75" height="30" rx="6" fill="#24242a" stroke="#a277ff" stroke-width="1"/>
+        <text x="237" y="108" fill="#a277ff" font-size="8" text-anchor="middle" font-family="system-ui">grad C</text>
+
+        <rect x="292" y="88" width="75" height="30" rx="6" fill="#24242a" stroke="#a277ff" stroke-width="1"/>
+        <text x="329" y="108" fill="#a277ff" font-size="8" text-anchor="middle" font-family="system-ui">grad D</text>
+
+        <!-- All-reduce ring -->
+        <text x="190" y="145" fill="#ff6b9d" font-size="9" text-anchor="middle" font-family="system-ui">All-Reduce: sum &amp; broadcast</text>
+
+        <path d="M52,118 L52,155 L145,155 L145,118" fill="none" stroke="#36364a" stroke-width="1.5" stroke-dasharray="4,3"/>
+        <path d="M145,118 L145,155 L237,155 L237,118" fill="none" stroke="#36364a" stroke-width="1.5" stroke-dasharray="4,3"/>
+        <path d="M237,118 L237,155 L329,155 L329,118" fill="none" stroke="#36364a" stroke-width="1.5" stroke-dasharray="4,3"/>
+
+        <!-- Averaged gradient to each GPU -->
+        <line x1="52" y1="160" x2="52" y2="195" stroke="#ff6b9d" stroke-width="1.5" marker-end="url(#rArrow)"/>
+        <line x1="145" y1="160" x2="145" y2="195" stroke="#ff6b9d" stroke-width="1.5" marker-end="url(#rArrow)"/>
+        <line x1="237" y1="160" x2="237" y2="195" stroke="#ff6b9d" stroke-width="1.5" marker-end="url(#rArrow)"/>
+        <line x1="329" y1="160" x2="329" y2="195" stroke="#ff6b9d" stroke-width="1.5" marker-end="url(#rArrow)"/>
+
+        <!-- Averaged gradient boxes -->
+        <rect x="15" y="198" width="75" height="30" rx="6" fill="#24242a" stroke="#ff6b9d" stroke-width="1"/>
+        <text x="52" y="218" fill="#ff6b9d" font-size="8" text-anchor="middle" font-family="system-ui">grad avg</text>
+
+        <rect x="108" y="198" width="75" height="30" rx="6" fill="#24242a" stroke="#ff6b9d" stroke-width="1"/>
+        <text x="145" y="218" fill="#ff6b9d" font-size="8" text-anchor="middle" font-family="system-ui">grad avg</text>
+
+        <rect x="200" y="198" width="75" height="30" rx="6" fill="#24242a" stroke="#ff6b9d" stroke-width="1"/>
+        <text x="237" y="218" fill="#ff6b9d" font-size="8" text-anchor="middle" font-family="system-ui">grad avg</text>
+
+        <rect x="292" y="198" width="75" height="30" rx="6" fill="#24242a" stroke="#ff6b9d" stroke-width="1"/>
+        <text x="329" y="218" fill="#ff6b9d" font-size="8" text-anchor="middle" font-family="system-ui">grad avg</text>
+
+        <!-- Update -->
+        <line x1="52" y1="228" x2="52" y2="255" stroke="#4ecdc4" stroke-width="1.2"/>
+        <line x1="145" y1="228" x2="145" y2="255" stroke="#4ecdc4" stroke-width="1.2"/>
+        <line x1="237" y1="228" x2="237" y2="255" stroke="#4ecdc4" stroke-width="1.2"/>
+        <line x1="329" y1="228" x2="329" y2="255" stroke="#4ecdc4" stroke-width="1.2"/>
+
+        <rect x="15" y="260" width="350" height="24" rx="6" fill="#24242a" stroke="#4ecdc4" stroke-width="1"/>
+        <text x="190" y="277" fill="#4ecdc4" font-size="9" text-anchor="middle" font-family="system-ui">All GPUs update with the same averaged gradient → synchronized weights</text>
+      </svg>
+    </div>
+  </div>
+
+  <h3>Three Levels of Parallelism</h3>
+
   <ul class="content-list">
-    <li><strong>Data parallelism</strong> — each GPU processes different micro-batches, gradients are averaged all-reduce</li>
-    <li><strong>Tensor parallelism</strong> — individual matrix multiplies are split across GPUs (Megatron-LM style)</li>
-    <li><strong>Pipeline parallelism</strong> — different layers are assigned to different GPUs (GPipe/1F1B style)</li>
+    <li><strong>Data parallelism</strong> — Each GPU processes different micro-batches. After each step, gradients are averaged (all-reduce) across all GPUs. Every GPU ends up with the same weight update. Simple and effective for models that fit on one GPU.</li>
+    <li><strong>Tensor parallelism</strong> — Individual matrix multiplies (like Q·K<sup>T</sup> for attention) are split across GPUs. Each GPU handles a slice of the weight matrix. This reduces memory per GPU at the cost of extra communication. Standardized in Megatron-LM.</li>
+    <li><strong>Pipeline parallelism</strong> — Different layers are assigned to different GPUs (GPU 0 has layers 1-10, GPU 1 has layers 11-20, etc.). This reduces memory but introduces idle time ("pipeline bubbles") as the pipeline fills and drains. Optimized with the 1F1B (one forward, one backward) schedule.</li>
   </ul>
 
+  <h3>ZeRO (Zero Redundancy Optimizer)</h3>
   <div class="callout">
-    <strong>ZeRO (Zero Redundancy Optimizer):</strong> An optimization that shards optimizer states, gradients, and parameters across GPUs, eliminating redundant copies. ZeRO-3 enables training 100B+ models on thousands of GPUs with near-linear scaling efficiency.
+    <strong>ZeRO eliminates redundant copies of data across GPUs.</strong><br><br>
+    In standard data parallelism, each GPU stores a complete copy of parameters, gradients, and optimizer states. For a 70B model in FP16:<br><br>
+    <div class="formula" style="display:block;margin:0.5rem 0;">
+      Parameters: 140GB + Gradients: 140GB + Optimizer states: 280GB = 560GB per GPU
+    </div>
+    That's 7x what a single A100 (80GB) can hold!<br><br>
+    <strong>ZeRO Stage 1:</strong> Shard optimizer states across GPUs — memory drops to ~340GB/GPU<br>
+    <strong>ZeRO Stage 2:</strong> Also shard gradients — memory drops to ~200GB/GPU<br>
+    <strong>ZeRO Stage 3:</strong> Also shard parameters — each GPU only stores ~16GB of model data, enabling 100B+ models on thousands of GPUs with near-linear scaling efficiency.
   </div>
 
   <h2 id="convergence">Convergence &amp; Loss Curves</h2>
-  <p>During training, the loss decreases following a power law with the number of tokens seen. A typical training run shows smooth decay with occasional spikes from data quality issues or numerical instability:</p>
+  <p>During training, the loss decreases following a <span class="key-term">power law</span> with the number of tokens seen. A typical training run shows smooth decay with occasional spikes from data quality issues or numerical instability:</p>
 
   <div class="math-block">
     <div class="math-block-header">Scaling relationship during training</div>
@@ -161,7 +409,66 @@
     </div>
   </div>
 
-  <p>Gradient clipping (|g| ≤ 1.0), learning rate warmup, and skipping problematic batches all help maintain stable training curves.</p>
+  <p>The loss curve tells you a lot about training health: a smooth downward trend means training is proceeding normally. Spikes or plateaus indicate problems.</p>
+
+  <h2 id="problems">What Can Go Wrong</h2>
+
+  <p>Training a massive LLM is <strong>hard</strong>. Here are the most common failure modes and how they're handled:</p>
+
+  <div style="background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius);overflow:hidden;margin:1.2rem 0;">
+    <table style="width:100%;border-collapse:collapse;font-size:0.85rem;">
+      <thead><tr>
+        <th style="text-align:left;padding:0.5rem 0.6rem;color:var(--text-muted);border-bottom:1px solid var(--border);background:var(--bg-accent);">Problem</th>
+        <th style="text-align:left;padding:0.5rem 0.6rem;color:var(--text-muted);border-bottom:1px solid var(--border);background:var(--bg-accent);">Cause</th>
+        <th style="text-align:left;padding:0.5rem 0.6rem;color:var(--text-muted);border-bottom:1px solid var(--border);background:var(--bg-accent);">Solution</th>
+      </tr></thead>
+      <tbody>
+        <tr style="color:var(--text);">
+          <td style="padding:0.5rem 0.6rem;border-bottom:1px solid var(--border);color:var(--accent2);font-weight:600;">Loss spike</td>
+          <td style="padding:0.5rem 0.6rem;border-bottom:1px solid var(--border);">Bad batch of data (corrupted tokens), numerical overflow</td>
+          <td style="padding:0.5rem 0.6rem;border-bottom:1px solid var(--border);">Skip the spike batch, reduce learning rate temporarily, restore from checkpoint before spike</td>
+        </tr>
+        <tr style="color:var(--text);">
+          <td style="padding:0.5rem 0.6rem;border-bottom:1px solid var(--border);color:var(--accent2);font-weight:600;">NaN / Inf loss</td>
+          <td style="padding:0.5rem 0.6rem;border-bottom:1px solid var(--border);">Gradient explosion, division by zero in LayerNorm, softmax overflow</td>
+          <td style="padding:0.5rem 0.6rem;border-bottom:1px solid var(--border);">Gradient clipping (max norm = 1.0), increase ε in LayerNorm, reduce batch size</td>
+        </tr>
+        <tr style="color:var(--text);">
+          <td style="padding:0.5rem 0.6rem;border-bottom:1px solid var(--border);color:var(--accent2);font-weight:600;">Loss divergence</td>
+          <td style="padding:0.5rem 0.6rem;border-bottom:1px solid var(--border);">Learning rate too high, bad initialization, corrupted checkpoint</td>
+          <td style="padding:0.5rem 0.6rem;border-bottom:1px solid var(--border);">Lower learning rate, restore from known-good checkpoint, add warmup</td>
+        </tr>
+        <tr style="color:var(--text);">
+          <td style="padding:0.5rem 0.6rem;border-bottom:1px solid var(--border);color:var(--accent2);font-weight:600;">Loss plateau</td>
+          <td style="padding:0.5rem 0.6rem;border-bottom:1px solid var(--border);">Model capacity exhausted, bad data mix, stuck in local minimum</td>
+          <td style="padding:0.5rem 0.6rem;border-bottom:1px solid var(--border);">Increase LR, add data variance, adjust batch size (sometimes increasing batch helps)</td>
+        </tr>
+        <tr style="color:var(--text);">
+          <td style="padding:0.5rem 0.6rem;border-bottom:1px solid var(--border);border-bottom:none;color:var(--accent2);font-weight:600;">Hardware failure</td>
+          <td style="padding:0.5rem 0.6rem;border-bottom:1px solid var(--border);border-bottom:none;">GPU crashes, network timeouts, memory errors (common at 2000+ GPU scale)</td>
+          <td style="padding:0.5rem 0.6rem;border-bottom:1px solid var(--border);border-bottom:none;">Frequent checkpointing (every 30-60 minutes), automatic failure recovery, redundant GPUs</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="callout-warn">
+    At the scale of a major LLM training run, <strong>hardware failures are inevitable</strong>. With 2,000 GPUs running for weeks, you'll lose GPUs daily. Training frameworks must be designed to handle this: checkpoint frequently, detect failures, and restart from the last good checkpoint. The industry standard is to checkpoint every 30-60 minutes, which costs ~2-3% of total training time but prevents catastrophic restart-from-scratch scenarios.
+  </div>
+
+  <p>Gradient clipping (|g| ≤ 1.0), learning rate warmup, and skipping problematic batches all help maintain stable training curves. Modern training frameworks (NeMo Megatron, DeepSpeed, torch FSDP) are battle-tested against these failure modes.</p>
+
+  <h2 id="summary">Summary</h2>
+  <ul class="content-list">
+    <li><strong>Core task:</strong> next-token prediction — "What word comes next?" on trillions of examples</li>
+    <li><strong>Loss function:</strong> cross-entropy — penalizes wrong confident predictions heavily</li>
+    <li><strong>Data curation:</strong> deduplication removes 30-50% of raw web data; quality filtering ensures coherent training</li>
+    <li><strong>Optimizer:</strong> AdamW — momentum + adaptive learning rates + weight decay</li>
+    <li><strong>LR schedule:</strong> warmup → cosine decay — fast exploration, then fine convergence</li>
+    <li><strong>Compute:</strong> 6·N·D FLOPs — LLaMA 2 70B needs ~8.4×10²³ FLOPs (2 days on 2000 H100s)</li>
+    <li><strong>Distributed training:</strong> data + tensor + pipeline parallelism + ZeRO</li>
+    <li><strong>Failure modes:</strong> loss spikes, NaN, divergence, hardware failure — handled with checkpointing, gradient clipping, and careful LR management</li>
+  </ul>
 
   <div class="completion-box">
     <span class="check-icon">✓</span>
