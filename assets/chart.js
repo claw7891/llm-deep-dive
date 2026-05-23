@@ -16,6 +16,8 @@
     const H = Math.max(rect.height, 260);
     canvas.width = W * dpr;
     canvas.height = H * dpr;
+    canvas.style.width = W + 'px';
+    canvas.style.height = H + 'px';
     ctx.scale(dpr, dpr);
 
     const pad = { top: 30, bottom: 40, left: 50, right: 20 };
@@ -137,6 +139,8 @@
     const H = Math.max(rect.height, 200);
     canvas.width = W * dpr;
     canvas.height = H * dpr;
+    canvas.style.width = W + 'px';
+    canvas.style.height = H + 'px';
     ctx.scale(dpr, dpr);
 
     const data = {
@@ -288,6 +292,8 @@
     const H = Math.max(W * 0.45, 180);
     canvas.width = W * dpr;
     canvas.height = H * dpr;
+    canvas.style.width = W + 'px';
+    canvas.style.height = H + 'px';
     ctx.scale(dpr, dpr);
 
     ctx.fillStyle = '#24242a';
