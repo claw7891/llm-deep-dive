@@ -116,6 +116,9 @@
     </div>
   </div>
 
+  <h3>Positional Encoding Combination</h3>
+<p>The input vector $x_i$ for each position $i$ is the sum of its token embedding and positional encoding: $x_i = \text{embedding}(token_i) + \text{pos\_encoding}(i)$. This combined vector, a $d$-dimensional representation carrying both what and where, is what enters the first transformer layer.</p>
+
   <h2 id="attention">Understanding Why Attention Is Needed</h2>
 
   <p>Before we dive into formulas, let's build <em>intuition</em> about what attention does and why it's essential.</p>
